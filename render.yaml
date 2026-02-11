@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: messenger-dtr
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn server:app"
