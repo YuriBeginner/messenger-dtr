@@ -3,6 +3,9 @@ from openpyxl import Workbook, load_workbook
 from datetime import datetime, timezone, timedelta
 import os
 import json
+import base64
+import requests
+
 
 app = Flask(__name__)
 VERIFY_TOKEN = "ojt_dtr_token"
@@ -38,6 +41,36 @@ def ensure_file(name):
 def is_empty(cell):
     return cell.value is None or str(cell.value).strip() == ""
 
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+REPO = "YOUR_GITHUB_USERNAME/YOUR_REPO_NAME"
+
+def upload_to_github(file_path, name):
+    url = f"https://api.github.com/repos/{REPO}/contents/DTR/{name}.xlsx"
+
+    with open(file_path, "rb") as f:
+        content = base64.b64encode(f.read()).decode()
+
+    # Check if file exists to get SHA
+    r = requests.get(url, headers={"Authorization": f"token {GITHUB_TOKEN}"})
+    sha = None
+    if r.status_code == 200:
+        sha = r.json()["sha"]
+
+    data = {
+        "message": f"Update DTR for {name}",
+        "content": content,
+        "branch": "main"
+    }
+
+    if sha:
+        data["sha"] = sha
+
+    requests.put(url, json=data, headers={
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Content-Type": "application/json"
+    })
+
+
 def log_time(name, action, timestamp):
     ensure_file(name)
     f = get_file(name)
@@ -65,6 +98,7 @@ def log_time(name, action, timestamp):
     if action == "TIME IN":
         ws.append([name, date_str, time_str, None])
         wb.save(f)
+        upload_to_github(f, name)
 
 # ---------- VERIFY WEBHOOK ----------
 @app.route("/webhook", methods=["GET"])
@@ -125,3 +159,4 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
