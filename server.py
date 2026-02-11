@@ -78,7 +78,7 @@ def log_time(name, action, timestamp):
     wb = load_workbook(f)
     ws = wb.active
 
-    # Convert Messenger UTC timestamp to Philippines time
+    # Convert Facebook timestamp to PH time
     utc_time = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
     ph_time = utc_time.astimezone(timezone(timedelta(hours=8)))
 
@@ -87,19 +87,28 @@ def log_time(name, action, timestamp):
 
     for row in ws.iter_rows(min_row=2):
         if row[0].value == name and row[1].value == date_str:
+
+            # If TIME IN already exists, ignore
             if action == "TIME IN":
                 return
+
+            # Fill TIME OUT if empty
             if action == "TIME OUT" and is_empty(row[3]):
                 row[3].value = time_str
                 wb.save(f)
+                upload_to_github(f, name)
                 return
+
+            # If TIME OUT already filled, ignore
             if action == "TIME OUT":
                 return
 
+    # If no row yet, create TIME IN
     if action == "TIME IN":
         ws.append([name, date_str, time_str, None])
         wb.save(f)
         upload_to_github(f, name)
+
 
 # ---------- VERIFY WEBHOOK ----------
 @app.route("/webhook", methods=["GET"])
@@ -160,5 +169,6 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
