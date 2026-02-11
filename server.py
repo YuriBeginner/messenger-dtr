@@ -84,3 +84,10 @@ def webhook():
 @app.route("/", methods=["GET"])
 def home():
     return "OJT DTR Bot is running!"
+
+from flask import send_from_directory
+
+@app.route('/privacy.html')
+def privacy():
+    return send_from_directory('.', 'privacy.html')
+
