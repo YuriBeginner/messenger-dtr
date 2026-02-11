@@ -70,13 +70,16 @@ def upload_to_github(file_path, name):
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 
 def send_message(psid, message):
-    url = "https://graph.facebook.com/v19.0/me/messages"
-    params = {"access_token": PAGE_ACCESS_TOKEN}
+    url = f"https://graph.facebook.com/v19.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
+
     payload = {
         "recipient": {"id": psid},
         "message": {"text": message}
     }
-    requests.post(url, params=params, json=payload)
+
+    r = requests.post(url, json=payload)
+    print("Messenger reply:", r.text)
+
 
 # ---------- LOG TIME ----------
 def log_time(name, action, timestamp):
@@ -205,4 +208,5 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
