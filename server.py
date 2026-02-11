@@ -1,3 +1,4 @@
+
 from flask import Flask, request
 from openpyxl import Workbook, load_workbook
 from datetime import datetime
@@ -114,5 +115,13 @@ def webhook():
 @app.route("/", methods=["GET"])
 def home():
     return "OJT DTR Bot is running!"
+
+from flask import send_from_directory
+
+@app.route("/download/<name>")
+def download_file(name):
+    return send_from_directory("DTR", f"{name}.xlsx", as_attachment=True)
+
+
 
 
