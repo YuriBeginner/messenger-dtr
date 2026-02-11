@@ -138,19 +138,21 @@ def webhook():
 
         users = load_users()
 
-        # ----- REGISTER (LOCKED) -----
+        # ----- REGISTER -----
         if text.startswith("REGISTER "):
             if sender_id in users:
-                print(f"{sender_id} tried to re-register. Ignored.")
+                send_message(sender_id, "⚠️ You are already registered.")
                 return "ok", 200
 
             real_name = raw_text.replace("REGISTER ", "").strip()
             users[sender_id] = real_name
             save_users(users)
+
+            send_message(sender_id, f"✅ Successfully registered as {real_name}")
             print(f"Registered {sender_id} as {real_name}")
             return "ok", 200
 
-        # ----- FIXNAME (WORKING) -----
+        # ----- FIXNAME -----
         if text.startswith("FIXNAME "):
             new_name = raw_text[8:].strip()
             old_name = users.get(sender_id)
@@ -166,6 +168,7 @@ def webhook():
                 users[sender_id] = new_name
                 save_users(users)
 
+                send_message(sender_id, f"✅ Name updated to {new_name}")
                 print(f"FIXNAME: {old_name} -> {new_name}")
 
             return "ok", 200
@@ -208,5 +211,6 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
