@@ -42,7 +42,8 @@ def is_empty(cell):
     return cell.value is None or str(cell.value).strip() == ""
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-REPO = "YOUR_GITHUB_USERNAME/YOUR_REPO_NAME"
+REPO = "YuriBeginner/messenger-dtr"
+
 
 def upload_to_github(file_path, name):
     url = f"https://api.github.com/repos/{REPO}/contents/DTR/{name}.xlsx"
@@ -159,4 +160,5 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
