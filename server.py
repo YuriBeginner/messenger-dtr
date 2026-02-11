@@ -67,6 +67,17 @@ def upload_to_github(file_path, name):
         "Content-Type": "application/json"
     })
 
+PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
+
+def send_message(psid, message):
+    url = "https://graph.facebook.com/v19.0/me/messages"
+    params = {"access_token": PAGE_ACCESS_TOKEN}
+    payload = {
+        "recipient": {"id": psid},
+        "message": {"text": message}
+    }
+    requests.post(url, params=params, json=payload)
+
 # ---------- LOG TIME ----------
 def log_time(name, action, timestamp):
     ensure_file(name)
@@ -162,7 +173,19 @@ def webhook():
         # ----- TIME IN / OUT -----
         if text in ["TIME IN", "TIME OUT"]:
             print(f"{name} -> {text}")
+
+    # Convert time for reply
+            utc_time = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+            ph_time = utc_time.astimezone(timezone(timedelta(hours=8)))
+            time_str = ph_time.strftime("%H:%M:%S")
+
             log_time(name, text, timestamp)
+
+            send_message(
+                sender_id,
+                f"✅ {text} recorded at {time_str}"
+            )
+
 
     except Exception as e:
         print("Error:", e)
@@ -182,3 +205,4 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
