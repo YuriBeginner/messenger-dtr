@@ -176,8 +176,8 @@ def webhook():
         name = users.get(sender_id, sender_id)
 
         # ----- FIXNAME FEATURE -----
-        if text.startswith("FIXNAME "):
-            new_name = raw_text.replace("FIXNAME ", "").strip()
+        if text.startswith("FIXNAME"):
+            new_name = raw_text[7:].strip()  # remove the word FIXNAME safely
 
             old_name = users.get(sender_id)
 
@@ -191,10 +191,9 @@ def webhook():
                 users[sender_id] = new_name
                 save_users(users)
 
-                print(f"Renamed {old_name} -> {new_name}")
+                print(f"FIXNAME: {old_name} -> {new_name}")
 
             return "ok", 200
-
 
         # ----- TIME IN / OUT -----
         if text in ["TIME IN", "TIME OUT"]:
@@ -219,6 +218,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
