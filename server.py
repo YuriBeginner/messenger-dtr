@@ -6,7 +6,6 @@ import json
 import base64
 import requests
 
-
 app = Flask(__name__)
 VERIFY_TOKEN = "ojt_dtr_token"
 
@@ -41,9 +40,9 @@ def ensure_file(name):
 def is_empty(cell):
     return cell.value is None or str(cell.value).strip() == ""
 
+# ---------- GITHUB ----------
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 REPO = "YuriBeginner/messenger-dtr"
-
 
 def upload_to_github(file_path, name):
     url = f"https://api.github.com/repos/{REPO}/contents/DTR/{name}.xlsx"
@@ -51,11 +50,8 @@ def upload_to_github(file_path, name):
     with open(file_path, "rb") as f:
         content = base64.b64encode(f.read()).decode()
 
-    # Check if file exists to get SHA
     r = requests.get(url, headers={"Authorization": f"token {GITHUB_TOKEN}"})
-    sha = None
-    if r.status_code == 200:
-        sha = r.json()["sha"]
+    sha = r.json().get("sha") if r.status_code == 200 else None
 
     data = {
         "message": f"Update DTR for {name}",
@@ -71,14 +67,13 @@ def upload_to_github(file_path, name):
         "Content-Type": "application/json"
     })
 
-
+# ---------- LOG TIME ----------
 def log_time(name, action, timestamp):
     ensure_file(name)
     f = get_file(name)
     wb = load_workbook(f)
     ws = wb.active
 
-    # Convert Facebook timestamp to PH time
     utc_time = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
     ph_time = utc_time.astimezone(timezone(timedelta(hours=8)))
 
@@ -88,27 +83,21 @@ def log_time(name, action, timestamp):
     for row in ws.iter_rows(min_row=2):
         if row[0].value == name and row[1].value == date_str:
 
-            # If TIME IN already exists, ignore
             if action == "TIME IN":
                 return
 
-            # Fill TIME OUT if empty
             if action == "TIME OUT" and is_empty(row[3]):
                 row[3].value = time_str
                 wb.save(f)
                 upload_to_github(f, name)
                 return
 
-            # If TIME OUT already filled, ignore
-            if action == "TIME OUT":
-                return
+            return
 
-    # If no row yet, create TIME IN
     if action == "TIME IN":
         ws.append([name, date_str, time_str, None])
         wb.save(f)
         upload_to_github(f, name)
-
 
 # ---------- VERIFY WEBHOOK ----------
 @app.route("/webhook", methods=["GET"])
@@ -119,7 +108,7 @@ def verify():
         return challenge
     return "Verification failed"
 
-# ---------- RECEIVE MESSAGES ----------
+# ---------- WEBHOOK ----------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
@@ -137,7 +126,6 @@ def webhook():
 
         # ----- REGISTER (LOCKED) -----
         if text.startswith("REGISTER "):
-
             if sender_id in users:
                 print(f"{sender_id} tried to re-register. Ignored.")
                 return "ok", 200
@@ -148,45 +136,18 @@ def webhook():
             print(f"Registered {sender_id} as {real_name}")
             return "ok", 200
 
-        # ----- ADMIN FIXNAME -----
+        # ----- FIXNAME (WORKING) -----
         if text.startswith("FIXNAME "):
-            parts = raw_text.split(" ", 2)
-
-            if len(parts) == 3:
-                target_id = parts[1].strip()
-                new_name = parts[2].strip()
-
-                if target_id in users:
-                    old_name = users[target_id]
-                    users[target_id] = new_name
-                    save_users(users)
-
-                    old_file = get_file(old_name)
-                    new_file = get_file(new_name)
-
-                    if os.path.exists(old_file):
-                        os.rename(old_file, new_file)
-                        upload_to_github(new_file, new_name)
-
-                    print(f"Fixed name: {old_name} -> {new_name}")
-
-            return "ok", 200
-
-        # ----- GET REGISTERED NAME -----
-        name = users.get(sender_id, sender_id)
-
-        # ----- FIXNAME FEATURE -----
-        if text.startswith("FIXNAME"):
-            new_name = raw_text[7:].strip()  # remove the word FIXNAME safely
-
+            new_name = raw_text[8:].strip()
             old_name = users.get(sender_id)
 
             if old_name:
-                old_file = f"DTR/{old_name}.xlsx"
-                new_file = f"DTR/{new_name}.xlsx"
+                old_file = get_file(old_name)
+                new_file = get_file(new_name)
 
                 if os.path.exists(old_file):
                     os.rename(old_file, new_file)
+                    upload_to_github(new_file, new_name)
 
                 users[sender_id] = new_name
                 save_users(users)
@@ -194,6 +155,9 @@ def webhook():
                 print(f"FIXNAME: {old_name} -> {new_name}")
 
             return "ok", 200
+
+        # ----- GET NAME -----
+        name = users.get(sender_id, sender_id)
 
         # ----- TIME IN / OUT -----
         if text in ["TIME IN", "TIME OUT"]:
@@ -205,12 +169,12 @@ def webhook():
 
     return "ok", 200
 
-# ---------- DOWNLOAD EXCEL ----------
+# ---------- DOWNLOAD ----------
 @app.route("/download/<name>")
 def download_file(name):
     return send_from_directory("DTR", f"{name}.xlsx", as_attachment=True)
 
-# ---------- PRIVACY PAGE ----------
+# ---------- PRIVACY ----------
 @app.route("/privacy.html")
 def privacy():
     return send_from_directory('.', 'privacy.html')
@@ -218,11 +182,3 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
-
-
-
-
-
-
-
-
