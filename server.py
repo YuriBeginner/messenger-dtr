@@ -50,6 +50,16 @@ def log_time(name, action, timestamp):
         wb.save(f)
 
 # ---------- VERIFY WEBHOOK ----------
+@app.route("/webhook", methods=["GET"])
+def verify():
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+
+    if token == VERIFY_TOKEN:
+        return challenge
+    return "Verification failed"
+
+# ---------- RECEIVE MESSAGES ----------
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
@@ -71,36 +81,6 @@ def webhook():
 
     return "ok", 200
 
-# ---------- RECEIVE MESSAGES ----------
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.json
-
-    try:
-        entry = data["entry"][0]
-        messaging = entry["messaging"][0]
-
-        name = messaging["sender"]["name"]
-        text = messaging["message"]["text"].strip().upper()
-        timestamp = messaging["timestamp"]
-
-        if text in ["TIME IN", "TIME OUT"]:
-            print(f"{name} -> {text}")
-            log_time(name, text, timestamp)
-
-    except Exception as e:
-        print("Error:", e)
-
-    return "ok", 200
-
 @app.route("/", methods=["GET"])
 def home():
     return "OJT DTR Bot is running!"
-
-from flask import send_from_directory
-
-@app.route('/privacy.html')
-def privacy():
-    return send_from_directory('.', 'privacy.html')
-
-
