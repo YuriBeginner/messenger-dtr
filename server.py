@@ -2,6 +2,20 @@ from flask import Flask, request
 from openpyxl import Workbook, load_workbook
 from datetime import datetime
 import os
+import json
+
+USERS_FILE = "users.json"
+
+def load_users():
+    if not os.path.exists(USERS_FILE):
+        return {}
+    with open(USERS_FILE, "r") as f:
+        return json.load(f)
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f)
+
 
 app = Flask(__name__)
 VERIFY_TOKEN = "ojt_dtr_token"
@@ -69,12 +83,27 @@ def webhook():
         messaging = entry["messaging"][0]
 
         sender_id = messaging["sender"]["id"]
-        text = messaging["message"]["text"].strip().upper()
+        raw_text = messaging["message"]["text"].strip()
+        text = raw_text.upper()
         timestamp = messaging["timestamp"]
 
-        if text in ["TIME IN", "TIME OUT"]:
-            print(f"{sender_id} -> {text}")
-            log_time(sender_id, text, timestamp)
+        users = load_users()
+
+# ----- REGISTER FEATURE -----
+        if text.startswith("REGISTER "):
+            real_name = raw_text.replace("REGISTER ", "").strip()
+            users[sender_id] = real_name
+            save_users(users)
+            print(f"Registered {sender_id} as {real_name}")
+            return "ok", 200
+
+# ----- GET REGISTERED NAME -----
+name = users.get(sender_id, sender_id)
+
+if text in ["TIME IN", "TIME OUT"]:
+    print(f"{name} -> {text}")
+    log_time(name, text, timestamp)
+
 
     except Exception as e:
         print("Error:", e)
@@ -84,3 +113,4 @@ def webhook():
 @app.route("/", methods=["GET"])
 def home():
     return "OJT DTR Bot is running!"
+
