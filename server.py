@@ -120,7 +120,7 @@ def verify():
     return "Verification failed"
 
 # ---------- RECEIVE MESSAGES ----------
-@@app.route("/webhook", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
 
@@ -198,6 +198,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
