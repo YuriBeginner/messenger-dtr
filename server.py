@@ -175,6 +175,27 @@ def webhook():
         # ----- GET REGISTERED NAME -----
         name = users.get(sender_id, sender_id)
 
+        # ----- FIXNAME FEATURE -----
+        if text.startswith("FIXNAME "):
+            new_name = raw_text.replace("FIXNAME ", "").strip()
+
+            old_name = users.get(sender_id)
+
+            if old_name:
+                old_file = f"DTR/{old_name}.xlsx"
+                new_file = f"DTR/{new_name}.xlsx"
+
+                if os.path.exists(old_file):
+                    os.rename(old_file, new_file)
+
+                users[sender_id] = new_name
+                save_users(users)
+
+                print(f"Renamed {old_name} -> {new_name}")
+
+            return "ok", 200
+
+
         # ----- TIME IN / OUT -----
         if text in ["TIME IN", "TIME OUT"]:
             print(f"{name} -> {text}")
@@ -198,6 +219,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
