@@ -89,7 +89,7 @@ def webhook():
 
         users = load_users()
 
-# ----- REGISTER FEATURE -----
+        # ----- REGISTER FEATURE -----
         if text.startswith("REGISTER "):
             real_name = raw_text.replace("REGISTER ", "").strip()
             users[sender_id] = real_name
@@ -97,20 +97,22 @@ def webhook():
             print(f"Registered {sender_id} as {real_name}")
             return "ok", 200
 
-# ----- GET REGISTERED NAME -----
-name = users.get(sender_id, sender_id)
+        # ----- GET REGISTERED NAME -----
+        name = users.get(sender_id, sender_id)
 
-if text in ["TIME IN", "TIME OUT"]:
-    print(f"{name} -> {text}")
-    log_time(name, text, timestamp)
-
+        # ----- TIME IN / OUT -----
+        if text in ["TIME IN", "TIME OUT"]:
+            print(f"{name} -> {text}")
+            log_time(name, text, timestamp)
 
     except Exception as e:
         print("Error:", e)
 
     return "ok", 200
 
+
 @app.route("/", methods=["GET"])
 def home():
     return "OJT DTR Bot is running!"
+
 
