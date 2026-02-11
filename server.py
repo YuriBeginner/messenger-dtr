@@ -120,7 +120,7 @@ def verify():
     return "Verification failed"
 
 # ---------- RECEIVE MESSAGES ----------
-@app.route("/webhook", methods=["POST"])
+@@app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
 
@@ -135,44 +135,42 @@ def webhook():
 
         users = load_users()
 
-# ----- REGISTER (LOCKED) -----
-if text.startswith("REGISTER "):
+        # ----- REGISTER (LOCKED) -----
+        if text.startswith("REGISTER "):
 
-    if sender_id in users:
-        print(f"{sender_id} tried to re-register. Ignored.")
-        return "ok", 200
+            if sender_id in users:
+                print(f"{sender_id} tried to re-register. Ignored.")
+                return "ok", 200
 
-    real_name = raw_text.replace("REGISTER ", "").strip()
-    users[sender_id] = real_name
-    save_users(users)
-    print(f"Registered {sender_id} as {real_name}")
-    return "ok", 200
-
-# ----- ADMIN FIXNAME -----
-if text.startswith("FIXNAME "):
-    parts = raw_text.split(" ", 2)
-
-    if len(parts) == 3:
-        target_id = parts[1].strip()
-        new_name = parts[2].strip()
-
-        if target_id in users:
-            old_name = users[target_id]
-            users[target_id] = new_name
+            real_name = raw_text.replace("REGISTER ", "").strip()
+            users[sender_id] = real_name
             save_users(users)
+            print(f"Registered {sender_id} as {real_name}")
+            return "ok", 200
 
-            # Rename Excel file
-            old_file = get_file(old_name)
-            new_file = get_file(new_name)
+        # ----- ADMIN FIXNAME -----
+        if text.startswith("FIXNAME "):
+            parts = raw_text.split(" ", 2)
 
-            if os.path.exists(old_file):
-                os.rename(old_file, new_file)
-                upload_to_github(new_file, new_name)
+            if len(parts) == 3:
+                target_id = parts[1].strip()
+                new_name = parts[2].strip()
 
-            print(f"Fixed name: {old_name} -> {new_name}")
+                if target_id in users:
+                    old_name = users[target_id]
+                    users[target_id] = new_name
+                    save_users(users)
 
-    return "ok", 200
+                    old_file = get_file(old_name)
+                    new_file = get_file(new_name)
 
+                    if os.path.exists(old_file):
+                        os.rename(old_file, new_file)
+                        upload_to_github(new_file, new_name)
+
+                    print(f"Fixed name: {old_name} -> {new_name}")
+
+            return "ok", 200
 
         # ----- GET REGISTERED NAME -----
         name = users.get(sender_id, sender_id)
@@ -200,6 +198,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
