@@ -1,9 +1,15 @@
-
-from flask import Flask, request
+from flask import Flask, request, send_from_directory
 from openpyxl import Workbook, load_workbook
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import os
 import json
+
+app = Flask(__name__)
+VERIFY_TOKEN = "ojt_dtr_token"
+
+# ---------- FILES ----------
+if not os.path.exists("DTR"):
+    os.makedirs("DTR")
 
 USERS_FILE = "users.json"
 
@@ -17,14 +23,7 @@ def save_users(users):
     with open(USERS_FILE, "w") as f:
         json.dump(users, f)
 
-
-app = Flask(__name__)
-VERIFY_TOKEN = "ojt_dtr_token"
-
-# ---------- EXCEL SETUP ----------
-if not os.path.exists("DTR"):
-    os.makedirs("DTR")
-
+# ---------- EXCEL ----------
 def get_file(name):
     return f"DTR/{name}.xlsx"
 
@@ -45,23 +44,26 @@ def log_time(name, action, timestamp):
     wb = load_workbook(f)
     ws = wb.active
 
-    dt = datetime.fromtimestamp(timestamp / 1000)
-    date = dt.strftime("%Y-%m-%d")
-    t = dt.strftime("%H:%M:%S")
+    # Convert Messenger UTC timestamp to Philippines time
+    utc_time = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+    ph_time = utc_time.astimezone(timezone(timedelta(hours=8)))
+
+    date_str = ph_time.strftime("%Y-%m-%d")
+    time_str = ph_time.strftime("%H:%M:%S")
 
     for row in ws.iter_rows(min_row=2):
-        if row[0].value == name and row[1].value == date:
+        if row[0].value == name and row[1].value == date_str:
             if action == "TIME IN":
                 return
             if action == "TIME OUT" and is_empty(row[3]):
-                row[3].value = t
+                row[3].value = time_str
                 wb.save(f)
                 return
             if action == "TIME OUT":
                 return
 
     if action == "TIME IN":
-        ws.append([name, date, t, None])
+        ws.append([name, date_str, time_str, None])
         wb.save(f)
 
 # ---------- VERIFY WEBHOOK ----------
@@ -69,7 +71,6 @@ def log_time(name, action, timestamp):
 def verify():
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
-
     if token == VERIFY_TOKEN:
         return challenge
     return "Verification failed"
@@ -111,17 +112,16 @@ def webhook():
 
     return "ok", 200
 
-
-@app.route("/", methods=["GET"])
-def home():
-    return "OJT DTR Bot is running!"
-
-from flask import send_from_directory
-
+# ---------- DOWNLOAD EXCEL ----------
 @app.route("/download/<name>")
 def download_file(name):
     return send_from_directory("DTR", f"{name}.xlsx", as_attachment=True)
 
+# ---------- PRIVACY PAGE ----------
+@app.route("/privacy.html")
+def privacy():
+    return send_from_directory('.', 'privacy.html')
 
-
-
+@app.route("/")
+def home():
+    return "OJT DTR Bot is running!"
