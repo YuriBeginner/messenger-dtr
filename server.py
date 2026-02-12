@@ -15,7 +15,7 @@ VERIFY_TOKEN = "ojt_dtr_token"
 # =========================================================
 
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-GITHUB_REPO = os.environ.get("GITHUB_REPO")  # e.g. YuriBeginner/messenger-dtr
+GITHUB_REPO = "YuriBeginner/messenger-dtr"
 GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
 
 GITHUB_HEADERS = {
@@ -304,3 +304,4 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
