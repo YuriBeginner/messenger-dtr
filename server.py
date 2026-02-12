@@ -121,6 +121,7 @@ def verify():
     if token == VERIFY_TOKEN:
         return challenge
     return "Verification failed"
+    
 
 # ---------- WEBHOOK ----------
 @app.route("/webhook", methods=["POST"])
@@ -130,6 +131,9 @@ def webhook():
     try:
         entry = data["entry"][0]
         messaging = entry["messaging"][0]
+
+        if "message" not in messaging:
+            return "ok", 200
 
         sender_id = messaging["sender"]["id"]
         raw_text = messaging["message"]["text"].strip()
@@ -188,10 +192,11 @@ def webhook():
             log_time(name, text, timestamp)
 
             send_message(
-                sender_id,
-                f"✅ {text} recorded at {time_str}"
-            )
+            sender_id,
+            f"✅ {text} recorded at {time_str}"
+        )
 
+        log_time(name, text, timestamp)
 
     except Exception as e:
         print("Error:", e)
@@ -211,6 +216,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
