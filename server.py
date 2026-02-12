@@ -31,16 +31,25 @@ def github_get_json(filename):
 
     if r.status_code == 200:
         data = r.json()
-        content = base64.b64decode(data["content"]).decode()
-        return json.loads(content), data["sha"]
+        content = base64.b64decode(data["content"]).decode().strip()
+
+        if not content:
+            # If file somehow empty
+            return {} if filename == "users.json" else [], data["sha"]
+
+        try:
+            return json.loads(content), data["sha"]
+        except:
+            print("Invalid JSON detected in", filename)
+            return {} if filename == "users.json" else [], data["sha"]
 
     elif r.status_code == 404:
-        # File doesn't exist yet
         return {} if filename == "users.json" else [], None
 
     else:
         print("GitHub GET error:", r.text)
         return {} if filename == "users.json" else [], None
+
 
 
 def github_save_json(filename, content_data, sha):
@@ -304,5 +313,6 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
