@@ -102,8 +102,25 @@ if not os.path.exists("DTR"):
 def get_file(name):
     return f"DTR/{name}.xlsx"
 
+def download_from_github(name):
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/DTR/{name}.xlsx"
+
+    r = requests.get(url, headers=GITHUB_HEADERS)
+
+    if r.status_code == 200:
+        data = r.json()
+        content = base64.b64decode(data["content"])
+
+        with open(get_file(name), "wb") as f:
+            f.write(content)
+
 def ensure_file(name):
     f = get_file(name)
+
+    if not os.path.exists(f):
+        # Try to download existing file first
+        download_from_github(name)
+
     if not os.path.exists(f):
         wb = Workbook()
         ws = wb.active
@@ -313,6 +330,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
