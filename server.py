@@ -273,20 +273,38 @@ def webhook():
         text = raw_text.upper()
         timestamp = messaging["timestamp"]
 
-        users, users_sha = load_users()
-
-        # ----- REGISTER -----
         if text.startswith("REGISTER "):
-            if sender_id in users:
+            real_name = raw_text.replace("REGISTER ", "").strip()
+
+            conn = get_db_connection()
+            cur = conn.cursor()
+    
+            # Check if already registered
+            cur.execute(
+                 "SELECT id FROM users WHERE messenger_id = %s",
+                (sender_id,)
+               )
+            existing_user = cur.fetchone()
+
+            if existing_user:
+                cur.close()
+                conn.close()
                 send_message(sender_id, "⚠️ You are already registered.")
                 return "ok", 200
 
-            real_name = raw_text.replace("REGISTER ", "").strip()
-            users[sender_id] = real_name
-            save_users(users, users_sha)
+            # Insert new user
+            cur.execute(
+                "INSERT INTO users (messenger_id, full_name) VALUES (%s, %s)",
+                (sender_id, real_name)
+            )
+
+            conn.commit()
+            cur.close()
+            conn.close()
 
             send_message(sender_id, f"✅ Successfully registered as {real_name}")
             return "ok", 200
+
 
         # ----- FIXNAME -----
         if text.startswith("FIXNAME "):
@@ -311,7 +329,23 @@ def webhook():
         # ----- TIME IN / OUT -----
         if text in ["TIME IN", "TIME OUT"]:
 
-            name = users.get(sender_id)
+            conn = get_db_connection()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            cur.execute(
+                "SELECT id, full_name FROM users WHERE messenger_id = %s",
+                (sender_id,)
+            )
+
+            user = cur.fetchone()
+            cur.close()
+            conn.close()
+
+            if user:
+                name = user["full_name"]
+                user_id = user["id"]
+            else:
+                name = None
 
             if not name:
                 send_message(sender_id, "⚠️ Please REGISTER first:\nREGISTER Your Full Name")
@@ -354,6 +388,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
