@@ -177,12 +177,32 @@ def webhook():
 
             return "ok", 200
 
-        # ----- GET NAME -----
-        name = users.get(sender_id, sender_id)
+        # ----- GET REGISTERED NAME -----
+        name = users.get(sender_id)
 
         # ----- TIME IN / OUT -----
         if text in ["TIME IN", "TIME OUT"]:
+
+            # 🚨 Enforce registration first
+            if not name:
+                send_message(sender_id, "⚠️ Please REGISTER first using:\nREGISTER Your Full Name")
+                return "ok", 200
+
             print(f"{name} -> {text}")
+
+            # Convert time for reply
+            utc_time = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+            ph_time = utc_time.astimezone(timezone(timedelta(hours=8)))
+            time_str = ph_time.strftime("%H:%M:%S")
+
+            log_time(name, text, timestamp)
+
+            send_message(
+                sender_id,
+                f"✅ {text} recorded at {time_str}"
+            )
+
+            return "ok", 200
 
     # Convert time for reply
             utc_time = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
@@ -216,6 +236,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
