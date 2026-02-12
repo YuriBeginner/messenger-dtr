@@ -14,6 +14,8 @@ if not os.path.exists("DTR"):
     os.makedirs("DTR")
 
 USERS_FILE = "users.json"
+PROCESSED_FILE = "processed_messages.json"
+
 
 def load_users():
     if not os.path.exists(USERS_FILE):
@@ -24,6 +26,17 @@ def load_users():
 def save_users(users):
     with open(USERS_FILE, "w") as f:
         json.dump(users, f)
+
+def load_processed():
+    if not os.path.exists(PROCESSED_FILE):
+        return set()
+    with open(PROCESSED_FILE, "r") as f:
+        return set(json.load(f))
+
+def save_processed(processed_set):
+    with open(PROCESSED_FILE, "w") as f:
+        json.dump(list(processed_set), f)
+
 
 # ---------- EXCEL ----------
 def get_file(name):
@@ -132,9 +145,22 @@ def webhook():
         entry = data["entry"][0]
         messaging = entry["messaging"][0]
 
+        # 🔒 Deduplication
         if "message" not in messaging:
             return "ok", 200
 
+        message_id = messaging["message"]["mid"]
+
+        processed = load_processed()
+
+        if message_id in processed:
+            print("Duplicate message ignored:", message_id)
+            return "ok", 200
+            
+        processed.add(message_id)
+        save_processed(processed)
+
+        # Continue normal processing
         sender_id = messaging["sender"]["id"]
         raw_text = messaging["message"]["text"].strip()
         text = raw_text.upper()
@@ -236,6 +262,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
