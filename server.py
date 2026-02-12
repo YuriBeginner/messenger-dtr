@@ -1,3 +1,4 @@
+from psycopg2.extras import RealDictCursor
 from flask import Flask, request, send_from_directory
 from openpyxl import Workbook, load_workbook
 from datetime import datetime, timezone, timedelta
@@ -5,10 +6,20 @@ import os
 import json
 import base64
 import requests
+import psycopg2
 
 app = Flask(__name__)
 
 VERIFY_TOKEN = "ojt_dtr_token"
+
+# =========================================================
+# ------------------- DATABASE ----------------------------
+# =========================================================
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
 # =========================================================
 # ------------------- GITHUB CONFIG -----------------------
@@ -149,6 +160,19 @@ def upload_to_github(file_path, name):
         payload["sha"] = sha
 
     requests.put(url, headers=GITHUB_HEADERS, json=payload)
+
+@app.route("/test-db")
+def test_db():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT 1;")
+        cur.close()
+        conn.close()
+        return "Database connected successfully!"
+    except Exception as e:
+        return f"Database error: {str(e)}"
+
 
 # =========================================================
 # ------------------- MESSENGER ---------------------------
@@ -330,6 +354,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
+
 
 
 
