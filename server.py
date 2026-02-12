@@ -7,38 +7,89 @@ import base64
 import requests
 
 app = Flask(__name__)
+
 VERIFY_TOKEN = "ojt_dtr_token"
 
-# ---------- FILES ----------
+# =========================================================
+# ------------------- GITHUB CONFIG -----------------------
+# =========================================================
+
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_REPO = os.environ.get("GITHUB_REPO")  # e.g. YuriBeginner/messenger-dtr
+GITHUB_BRANCH = os.environ.get("GITHUB_BRANCH", "main")
+
+GITHUB_HEADERS = {
+    "Authorization": f"token {GITHUB_TOKEN}",
+    "Accept": "application/vnd.github.v3+json"
+}
+
+def github_get_json(filename):
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
+    params = {"ref": GITHUB_BRANCH}
+
+    r = requests.get(url, headers=GITHUB_HEADERS, params=params)
+
+    if r.status_code == 200:
+        data = r.json()
+        content = base64.b64decode(data["content"]).decode()
+        return json.loads(content), data["sha"]
+
+    elif r.status_code == 404:
+        # File doesn't exist yet
+        return {} if filename == "users.json" else [], None
+
+    else:
+        print("GitHub GET error:", r.text)
+        return {} if filename == "users.json" else [], None
+
+
+def github_save_json(filename, content_data, sha):
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{filename}"
+
+    encoded_content = base64.b64encode(
+        json.dumps(content_data, indent=2).encode()
+    ).decode()
+
+    payload = {
+        "message": f"Update {filename}",
+        "content": encoded_content,
+        "branch": GITHUB_BRANCH
+    }
+
+    if sha:
+        payload["sha"] = sha
+
+    r = requests.put(url, headers=GITHUB_HEADERS, json=payload)
+
+    if r.status_code not in [200, 201]:
+        print("GitHub SAVE error:", r.text)
+
+# =========================================================
+# ------------------- JSON STORAGE ------------------------
+# =========================================================
+
+def load_users():
+    users, sha = github_get_json("users.json")
+    return users, sha
+
+def save_users(users, sha):
+    github_save_json("users.json", users, sha)
+
+
+def load_processed():
+    data, sha = github_get_json("processed_messages.json")
+    return set(data), sha
+
+def save_processed(processed_set, sha):
+    github_save_json("processed_messages.json", list(processed_set), sha)
+
+# =========================================================
+# ------------------- EXCEL STORAGE -----------------------
+# =========================================================
+
 if not os.path.exists("DTR"):
     os.makedirs("DTR")
 
-USERS_FILE = "users.json"
-PROCESSED_FILE = "processed_messages.json"
-
-
-def load_users():
-    if not os.path.exists(USERS_FILE):
-        return {}
-    with open(USERS_FILE, "r") as f:
-        return json.load(f)
-
-def save_users(users):
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f)
-
-def load_processed():
-    if not os.path.exists(PROCESSED_FILE):
-        return set()
-    with open(PROCESSED_FILE, "r") as f:
-        return set(json.load(f))
-
-def save_processed(processed_set):
-    with open(PROCESSED_FILE, "w") as f:
-        json.dump(list(processed_set), f)
-
-
-# ---------- EXCEL ----------
 def get_file(name):
     return f"DTR/{name}.xlsx"
 
@@ -53,32 +104,29 @@ def ensure_file(name):
 def is_empty(cell):
     return cell.value is None or str(cell.value).strip() == ""
 
-# ---------- GITHUB ----------
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
-REPO = "YuriBeginner/messenger-dtr"
-
 def upload_to_github(file_path, name):
-    url = f"https://api.github.com/repos/{REPO}/contents/DTR/{name}.xlsx"
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/DTR/{name}.xlsx"
 
     with open(file_path, "rb") as f:
         content = base64.b64encode(f.read()).decode()
 
-    r = requests.get(url, headers={"Authorization": f"token {GITHUB_TOKEN}"})
+    r = requests.get(url, headers=GITHUB_HEADERS)
     sha = r.json().get("sha") if r.status_code == 200 else None
 
-    data = {
+    payload = {
         "message": f"Update DTR for {name}",
         "content": content,
-        "branch": "main"
+        "branch": GITHUB_BRANCH
     }
 
     if sha:
-        data["sha"] = sha
+        payload["sha"] = sha
 
-    requests.put(url, json=data, headers={
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Content-Type": "application/json"
-    })
+    requests.put(url, headers=GITHUB_HEADERS, json=payload)
+
+# =========================================================
+# ------------------- MESSENGER ---------------------------
+# =========================================================
 
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 
@@ -93,8 +141,10 @@ def send_message(psid, message):
     r = requests.post(url, json=payload)
     print("Messenger reply:", r.text)
 
+# =========================================================
+# ------------------- TIME LOGIC --------------------------
+# =========================================================
 
-# ---------- LOG TIME ----------
 def log_time(name, action, timestamp):
     ensure_file(name)
     f = get_file(name)
@@ -111,22 +161,28 @@ def log_time(name, action, timestamp):
         if row[0].value == name and row[1].value == date_str:
 
             if action == "TIME IN":
-                return
+                return False
 
             if action == "TIME OUT" and is_empty(row[3]):
                 row[3].value = time_str
                 wb.save(f)
                 upload_to_github(f, name)
-                return
+                return True
 
-            return
+            return False
 
     if action == "TIME IN":
         ws.append([name, date_str, time_str, None])
         wb.save(f)
         upload_to_github(f, name)
+        return True
 
-# ---------- VERIFY WEBHOOK ----------
+    return False
+
+# =========================================================
+# ------------------- WEBHOOK VERIFY ----------------------
+# =========================================================
+
 @app.route("/webhook", methods=["GET"])
 def verify():
     token = request.args.get("hub.verify_token")
@@ -134,9 +190,11 @@ def verify():
     if token == VERIFY_TOKEN:
         return challenge
     return "Verification failed"
-    
 
-# ---------- WEBHOOK ----------
+# =========================================================
+# ------------------- WEBHOOK POST ------------------------
+# =========================================================
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.json
@@ -145,28 +203,27 @@ def webhook():
         entry = data["entry"][0]
         messaging = entry["messaging"][0]
 
-        # 🔒 Deduplication
         if "message" not in messaging:
             return "ok", 200
 
         message_id = messaging["message"]["mid"]
 
-        processed = load_processed()
+        # ----- Deduplication -----
+        processed, processed_sha = load_processed()
 
         if message_id in processed:
-            print("Duplicate message ignored:", message_id)
+            print("Duplicate ignored:", message_id)
             return "ok", 200
-            
-        processed.add(message_id)
-        save_processed(processed)
 
-        # Continue normal processing
+        processed.add(message_id)
+        save_processed(processed, processed_sha)
+
         sender_id = messaging["sender"]["id"]
         raw_text = messaging["message"]["text"].strip()
         text = raw_text.upper()
         timestamp = messaging["timestamp"]
 
-        users = load_users()
+        users, users_sha = load_users()
 
         # ----- REGISTER -----
         if text.startswith("REGISTER "):
@@ -176,10 +233,9 @@ def webhook():
 
             real_name = raw_text.replace("REGISTER ", "").strip()
             users[sender_id] = real_name
-            save_users(users)
+            save_users(users, users_sha)
 
             send_message(sender_id, f"✅ Successfully registered as {real_name}")
-            print(f"Registered {sender_id} as {real_name}")
             return "ok", 200
 
         # ----- FIXNAME -----
@@ -196,65 +252,51 @@ def webhook():
                     upload_to_github(new_file, new_name)
 
                 users[sender_id] = new_name
-                save_users(users)
+                save_users(users, users_sha)
 
                 send_message(sender_id, f"✅ Name updated to {new_name}")
-                print(f"FIXNAME: {old_name} -> {new_name}")
 
             return "ok", 200
-
-        # ----- GET REGISTERED NAME -----
-        name = users.get(sender_id)
 
         # ----- TIME IN / OUT -----
         if text in ["TIME IN", "TIME OUT"]:
 
-            # 🚨 Enforce registration first
+            name = users.get(sender_id)
+
             if not name:
-                send_message(sender_id, "⚠️ Please REGISTER first using:\nREGISTER Your Full Name")
+                send_message(sender_id, "⚠️ Please REGISTER first:\nREGISTER Your Full Name")
                 return "ok", 200
 
-            print(f"{name} -> {text}")
+            success = log_time(name, text, timestamp)
 
-            # Convert time for reply
             utc_time = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
             ph_time = utc_time.astimezone(timezone(timedelta(hours=8)))
             time_str = ph_time.strftime("%H:%M:%S")
 
-            log_time(name, text, timestamp)
-
-            send_message(
-                sender_id,
-                f"✅ {text} recorded at {time_str}"
-            )
+            if success:
+                send_message(sender_id, f"✅ {text} recorded at {time_str}")
+            else:
+                send_message(sender_id, f"⚠️ {text} already recorded or invalid.")
 
             return "ok", 200
-
-    # Convert time for reply
-            utc_time = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
-            ph_time = utc_time.astimezone(timezone(timedelta(hours=8)))
-            time_str = ph_time.strftime("%H:%M:%S")
-
-            log_time(name, text, timestamp)
-
-            send_message(
-            sender_id,
-            f"✅ {text} recorded at {time_str}"
-        )
-
-        log_time(name, text, timestamp)
 
     except Exception as e:
         print("Error:", e)
 
     return "ok", 200
 
-# ---------- DOWNLOAD ----------
+# =========================================================
+# ------------------- DOWNLOAD ----------------------------
+# =========================================================
+
 @app.route("/download/<name>")
 def download_file(name):
     return send_from_directory("DTR", f"{name}.xlsx", as_attachment=True)
 
-# ---------- PRIVACY ----------
+# =========================================================
+# ------------------- PRIVACY -----------------------------
+# =========================================================
+
 @app.route("/privacy.html")
 def privacy():
     return send_from_directory('.', 'privacy.html')
@@ -262,9 +304,3 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot is running!"
-
-
-
-
-
-
