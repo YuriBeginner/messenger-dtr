@@ -200,6 +200,23 @@ def handle_time_punch(cur, sender_id: str, cmd: str, utc_dt: datetime, today_ph:
         if record and record["time_in"] is not None:
             return "⚠️ TIME IN already recorded today."
 
+        # Check for previous open session (before today)
+        cur.execute("""
+            SELECT date
+            FROM dtr_records
+            WHERE user_id = %s
+              AND time_in IS NOT NULL
+              AND time_out IS NULL
+              AND date < %s
+            ORDER BY date DESC
+            LIMIT 1
+        """, (user_id, today_ph))
+
+        open_session = cur.fetchone()
+
+        if open_session:
+            return f"⚠️ You have an open session from {open_session['date']}. Please contact your coordinator."
+
         # --- compute late ---
         ph_now = utc_dt.astimezone(PH_TZ)
         is_late, late_minutes = compute_late(ph_now)
@@ -328,8 +345,8 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
         f"• Remaining: {fmt_hm(remaining_minutes)} (of {required_hours}h)\n\n"
         f"Compliance:\n"
         f"• Missing time-outs: {missing_count}\n"
-        f"• Latest missing date: {latest_text}"
-        f"• Late count: {late_count}\n"
+        f"• Latest missing date: {latest_text}\n"
+        f"• Late count: {late_count}"
     )
 # =========================================================
 # Home
@@ -338,6 +355,7 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
