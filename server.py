@@ -150,12 +150,24 @@ def webhook():
 
 def handle_time_punch(cur, sender_id: str, cmd: str, utc_dt: datetime, today_ph: date) -> str:
     # Load user
-    cur.execute("SELECT id FROM users WHERE messenger_id = %s", (sender_id,))
+    cur.execute("""
+        SELECT id, start_date, end_date
+          FROM users
+        WHERE messenger_id = %s
+    """, (sender_id,))
     user = cur.fetchone()
     if not user:
         return "⚠️ Please REGISTER first."
 
     user_id = user["id"]
+    start_date = user["start_date"]  # DATE in DB
+    end_date = user["end_date"]      # DATE in DB
+
+    # OJT period enforcement (based on PH local date)
+    if start_date is not None and today_ph < start_date:
+        return f"⛔ OJT not started yet. Start date: {start_date}"
+    if end_date is not None and today_ph > end_date:
+        return f"⛔ OJT already ended. End date: {end_date}"
 
     # Lock today's record row (if exists) to avoid races
     cur.execute("""
@@ -267,5 +279,6 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
