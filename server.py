@@ -13,6 +13,9 @@ PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 PH_TZ = timezone(timedelta(hours=8))
+OFFICIAL_START_HOUR = 8
+OFFICIAL_START_MINUTE = 0
+GRACE_MINUTES = 0   # set to 10 if you want grace
 
 def as_aware_utc(dt):
     """Ensure datetime is timezone-aware in UTC."""
@@ -21,6 +24,20 @@ def as_aware_utc(dt):
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+def compute_late(ph_dt: datetime):
+    """Returns (is_late: bool, late_minutes: int)."""
+    start = datetime(
+        ph_dt.year, ph_dt.month, ph_dt.day,
+        OFFICIAL_START_HOUR, OFFICIAL_START_MINUTE,
+        tzinfo=PH_TZ
+    ) + timedelta(minutes=GRACE_MINUTES)
+
+    if ph_dt <= start:
+        return False, 0
+
+    late_mins = int((ph_dt - start).total_seconds() // 60)
+    return True, late_mins
 
 # =========================================================
 # Database
@@ -179,22 +196,32 @@ def handle_time_punch(cur, sender_id: str, cmd: str, utc_dt: datetime, today_ph:
     record = cur.fetchone()
 
     if cmd == "TIME IN":
+
         if record and record["time_in"] is not None:
             return "⚠️ TIME IN already recorded today."
 
+        # --- compute late ---
+        ph_now = utc_dt.astimezone(PH_TZ)
+        is_late, late_minutes = compute_late(ph_now)
+
         if not record:
             cur.execute("""
-                INSERT INTO dtr_records (user_id, date, time_in)
-                VALUES (%s, %s, %s)
-            """, (user_id, today_ph, utc_dt))
+                INSERT INTO dtr_records (user_id, date, time_in, is_late, late_minutes)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (user_id, today_ph, utc_dt, is_late, late_minutes))
         else:
             cur.execute("""
                 UPDATE dtr_records
-                SET time_in = %s
+                SET time_in = %s,
+                    is_late = %s,
+                    late_minutes = %s
                 WHERE id = %s
-            """, (utc_dt, record["id"]))
+            """, (utc_dt, is_late, late_minutes, record["id"]))
 
-        return f"✅ TIME IN recorded at {utc_dt.astimezone(PH_TZ).strftime('%I:%M %p')}"
+        t = ph_now.strftime('%I:%M %p')
+        if is_late:
+            return f"✅ TIME IN recorded at {t} (Late {late_minutes} min)"
+        return f"✅ TIME IN recorded at {t}"
 
     # TIME OUT
     if not record or record["time_in"] is None:
@@ -237,11 +264,15 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 
     # Today record
     cur.execute("""
-        SELECT time_in, time_out, minutes_worked
+        SELECT time_in, time_out, minutes_worked, is_late, late_minutes
         FROM dtr_records
         WHERE user_id = %s AND date = %s
     """, (user_id, today_ph))
     today_rec = cur.fetchone() or {}
+
+    late_note = ""
+    if today_rec.get("is_late"):
+        late_note = f" (Late {today_rec.get('late_minutes', 0)} min)"
 
     # Totals
     cur.execute("""
@@ -250,6 +281,14 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
         WHERE user_id = %s
     """, (user_id,))
     total_minutes = int(cur.fetchone()["total_minutes"])
+
+    cur.execute("""
+        SELECT COUNT(*) AS late_count
+        FROM dtr_records
+        WHERE user_id = %s
+          AND is_late = TRUE
+    """, (user_id,))
+    late_count = int(cur.fetchone()["late_count"])
 
     # Missing TIME OUTs (before today)
     cur.execute("""
@@ -281,7 +320,7 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
     return (
         f"📌 STATUS\n"
         f"Today ({today_ph}):\n"
-        f"• Time In: {fmt_ph(time_in)}\n"
+        f"• Time In: {fmt_ph(time_in)}{late_note}\n"
         f"• Time Out: {fmt_ph(time_out)}\n"
         f"• Worked today: {today_worked}\n\n"
         f"Totals:\n"
@@ -290,6 +329,7 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
         f"Compliance:\n"
         f"• Missing time-outs: {missing_count}\n"
         f"• Latest missing date: {latest_text}"
+        f"• Late count: {late_count}\n"
     )
 # =========================================================
 # Home
@@ -298,6 +338,7 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
