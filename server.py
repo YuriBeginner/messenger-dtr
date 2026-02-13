@@ -85,6 +85,7 @@ def webhook():
 
         message_id = messaging["message"]["mid"]
         sender_id = messaging["sender"]["id"]
+        print("PSID:", sender_id)
         raw_text = messaging["message"]["text"].strip()
         text = raw_text.upper()
         timestamp_ms = messaging["timestamp"]
@@ -254,3 +255,4 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
