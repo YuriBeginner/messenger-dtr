@@ -251,6 +251,21 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
     """, (user_id,))
     total_minutes = int(cur.fetchone()["total_minutes"])
 
+    # Missing TIME OUTs (before today)
+    cur.execute("""
+        SELECT
+          COUNT(*) AS missing_count,
+          MAX(date) AS latest_missing_date
+        FROM dtr_records
+        WHERE user_id = %s
+          AND time_in IS NOT NULL
+          AND time_out IS NULL
+          AND date < %s
+    """, (user_id, today_ph))
+    missing = cur.fetchone()
+    missing_count = int(missing["missing_count"])
+    latest_missing_date = missing["latest_missing_date"]  # may be None
+
     required_minutes = required_hours * 60
     remaining_minutes = max(0, required_minutes - total_minutes)
 
@@ -261,6 +276,8 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 
     today_worked = "—" if minutes_today is None else fmt_hm(int(minutes_today))
 
+    latest_text = "—" if latest_missing_date is None else str(latest_missing_date)
+
     return (
         f"📌 STATUS\n"
         f"Today ({today_ph}):\n"
@@ -269,9 +286,11 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
         f"• Worked today: {today_worked}\n\n"
         f"Totals:\n"
         f"• Accumulated: {fmt_hm(total_minutes)}\n"
-        f"• Remaining: {fmt_hm(remaining_minutes)} (of {required_hours}h)"
+        f"• Remaining: {fmt_hm(remaining_minutes)} (of {required_hours}h)\n\n"
+        f"Compliance:\n"
+        f"• Missing time-outs: {missing_count}\n"
+        f"• Latest missing date: {latest_text}"
     )
-
 # =========================================================
 # Home
 # =========================================================
@@ -279,6 +298,7 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
