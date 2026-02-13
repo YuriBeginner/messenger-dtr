@@ -4,6 +4,7 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import requests
+from datetime import timezone
 
 app = Flask(__name__)
 
@@ -12,6 +13,14 @@ PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 PH_TZ = timezone(timedelta(hours=8))
+
+def as_aware_utc(dt):
+    """Ensure datetime is timezone-aware in UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 # =========================================================
 # Database
@@ -47,7 +56,7 @@ def get_times_from_ms(ts_ms: int):
 def fmt_ph(dt):
     if not dt:
         return "—"
-    # dt from DB is tz-aware (TIMESTAMPTZ). Convert to PH for display.
+    dt = as_aware_utc(dt)
     ph = dt.astimezone(PH_TZ)
     return ph.strftime("%I:%M %p")
 
@@ -182,17 +191,20 @@ def handle_time_punch(cur, sender_id: str, cmd: str, utc_dt: datetime, today_ph:
     if record["time_out"] is not None:
         return "⚠️ TIME OUT already recorded today."
 
-    if utc_dt <= record["time_in"]:
+    time_in_utc = as_aware_utc(record["time_in"])
+    time_out_utc = as_aware_utc(utc_dt)
+
+    if time_out_utc <= time_in_utc:
         return "⚠️ Invalid TIME OUT (earlier than TIME IN)."
 
-    minutes_worked = int((utc_dt - record["time_in"]).total_seconds() // 60)
+    minutes_worked = int((time_out_utc - time_in_utc).total_seconds() // 60)
 
     cur.execute("""
         UPDATE dtr_records
         SET time_out = %s,
             minutes_worked = %s
         WHERE id = %s
-    """, (utc_dt, minutes_worked, record["id"]))
+    """, (time_out_utc, minutes_worked, record["id"]))
 
     return f"✅ TIME OUT recorded at {utc_dt.astimezone(PH_TZ).strftime('%I:%M %p')} (Worked {fmt_hm(minutes_worked)})"
 
@@ -255,4 +267,5 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
