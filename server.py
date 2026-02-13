@@ -92,38 +92,95 @@ def webhook():
         cur.close()
         conn.close()
 
-        # =================================================
-        # REGISTER
-        # =================================================
 
-        if text.startswith("REGISTER "):
-            real_name = raw_text.replace("REGISTER ", "").strip()
+        if text == "REGISTER FORMAT":
+            send_message(sender_id,
+        """📝 OJT Registration Format:
 
-            conn = get_db_connection()
-            cur = conn.cursor()
+        REGISTER    
+        Name: Your Full Name
+        StudentID: Your ID
+        Course: BSIT
+        Section: 4A    
+        Company: Company Name
+        RequiredHours: 240
+        Start: YYYY-MM-DD
+        End: YYYY-MM-DD
+        """)
+            return "ok", 200
 
-            cur.execute(
-                "SELECT id FROM users WHERE messenger_id = %s",
-                (sender_id,)
-            )
-            existing_user = cur.fetchone()
+        # ----- REGISTER -----
+        if text.startswith("REGISTER"):
 
-            if existing_user:
-                cur.close()
-                conn.close()
-                send_message(sender_id, "⚠️ You are already registered.")
+    # If only REGISTER was typed → show format
+            if raw_text.strip().upper() == "REGISTER":
+                send_message(sender_id,
+        """📝 OJT Registration Format:
+
+        REGISTER
+        Name: Your Full Name
+        StudentID: Your ID
+        Course: BSIT
+        Section: 4A
+        Company: Company Name
+        RequiredHours: 240
+        Start: YYYY-MM-DD
+        End: YYYY-MM-DD
+        """)
                 return "ok", 200
 
-            cur.execute(
-                "INSERT INTO users (messenger_id, full_name) VALUES (%s, %s)",
-                (sender_id, real_name)
-            )
+            # Otherwise → process registration
+            try:
+                lines = raw_text.split("\n")[1:]
 
-            conn.commit()
-            cur.close()
-            conn.close()
+                data = {}
+                for line in lines:
+                    key, value = line.split(":", 1)
+                    data[key.strip().lower()] = value.strip()
 
-            send_message(sender_id, f"✅ Successfully registered as {real_name}")
+                conn = get_db_connection()
+                cur = conn.cursor()
+
+                # Check if already registered
+                cur.execute(
+                    "SELECT id FROM users WHERE messenger_id = %s",
+                    (sender_id,)
+                )
+
+                if cur.fetchone():
+                    send_message(sender_id, "⚠️ You are already registered.")
+                    cur.close()
+                    conn.close()
+                    return "ok", 200
+
+                # Insert new user
+                cur.execute("""
+                    INSERT INTO users
+                    (messenger_id, full_name, student_id, course, section,
+                     company_name, required_hours, start_date, end_date)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    sender_id,
+                    data.get("name"),
+                    data.get("studentid"),
+                    data.get("course"),
+                    data.get("section"),
+                    data.get("company"),
+                    int(data.get("requiredhours", 240)),
+                    data.get("start"),
+                    data.get("end")
+                ))
+
+                conn.commit()
+                cur.close()
+                conn.close()
+
+                send_message(sender_id, "✅ Registration successful!")
+
+            except Exception as e:
+                print("Register error:", e)
+                send_message(sender_id, "⚠️ Registration format incorrect. Type REGISTER to see format.")
+
             return "ok", 200
 
         # =================================================
@@ -222,3 +279,4 @@ def webhook():
 @app.route("/")
 def home():
     return "DTR Bot (PostgreSQL Version) Running"
+
