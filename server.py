@@ -394,8 +394,33 @@ def webhook():
                             send_message(sender_id, msg)
                             return "ok", 200
 
-                        if cmd == "ADMIN MISSING TODAY":
-                            msg = handle_admin_missing_today(cur, today_ph)
+                        if cmd.startswith("ADMIN MISSING TODAY"):
+                            parts = cmd.split()
+
+                            # Formats:
+                            # ADMIN MISSING TODAY
+                            # ADMIN MISSING TODAY <COURSE>
+                            # ADMIN MISSING TODAY <COURSE> <SECTION>
+                            course = None
+                            section = None
+
+                            if len(parts) == 4:
+                                course = parts[3].upper()
+                            elif len(parts) == 5:
+                                course = parts[3].upper()
+                                section = parts[4].upper()
+                            elif len(parts) != 3:
+                                send_message(
+                                    sender_id,
+                                    "Usage:\n"
+                                    "• ADMIN MISSING TODAY\n"
+                                    "• ADMIN MISSING TODAY <course>\n"
+                                    "• ADMIN MISSING TODAY <course> <section>\n"
+                                    "Example: ADMIN MISSING TODAY BSECE 4B"
+                                )
+                                return "ok", 200
+
+                            msg = handle_admin_missing_today(cur, today_ph, course=course, section=section)
                             send_message(sender_id, msg)
                             return "ok", 200
 
@@ -439,11 +464,11 @@ def webhook():
                             "Admin commands:\n"
                             "• ADMIN SUMMARY\n"
                             "• ADMIN MISSING TODAY\n"
-                            "• ADMIN STUDENT <student_id>"
-                            "• ADMIN SECTION <section>"
+                            "  - optional filters: <course> or <course> <section>\n"
+                            "  - example: ADMIN MISSING TODAY BSECE 4B\n"
+                            "• ADMIN STUDENT <student_id>\n"
                             "• ADMIN CLASS <course> <section>"
                         )
-                        
                         return "ok", 200
                         
                     # ==========================
@@ -722,28 +747,48 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
         f"• Late count: {late_count}"
     )
 
-def handle_admin_missing_today(cur, today_ph: date) -> str:
-    cur.execute("""
-        SELECT u.full_name, u.student_id, u.section
+def handle_admin_missing_today(cur, today_ph: date, course: str = None, section: str = None) -> str:
+    where = ["r.date = %s", "r.time_in IS NOT NULL", "r.time_out IS NULL"]
+    params = [today_ph]
+
+    if course:
+        where.append("UPPER(u.course) = %s")
+        params.append(course.upper())
+
+    if section:
+        where.append("UPPER(u.section) = %s")
+        params.append(section.upper())
+
+    where_sql = " AND ".join(where)
+
+    cur.execute(f"""
+        SELECT u.full_name, u.student_id, u.course, u.section
         FROM dtr_records r
         JOIN users u ON u.id = r.user_id
-        WHERE r.date = %s
-          AND r.time_in IS NOT NULL
-          AND r.time_out IS NULL
-        ORDER BY u.section, u.full_name
-    """, (today_ph,))
+        WHERE {where_sql}
+        ORDER BY u.course, u.section, u.full_name
+    """, tuple(params))
+
     rows = cur.fetchall()
 
-    if not rows:
-        return f"✅ No students missing TIME OUT for {today_ph}."
+    scope = "All"
+    if course and section:
+        scope = f"{course} {section}"
+    elif course:
+        scope = f"{course}"
 
-    lines = [f"⚠️ Missing TIME OUT ({today_ph}):"]
-    for r in rows:
+    if not rows:
+        return f"✅ No students missing TIME OUT today ({today_ph}) — Scope: {scope}"
+
+    lines = [f"⚠️ Missing TIME OUT today ({today_ph}) — Scope: {scope}"]
+    for r in rows[:25]:  # cap for Messenger readability
         lines.append(
-            f"- {r.get('full_name','')} "
-            f"({r.get('student_id','')}) "
-            f"[{r.get('section','')}]"
+            f"- {r.get('full_name','')} ({r.get('student_id','')}) "
+            f"[{r.get('course','')} {r.get('section','')}]"
         )
+
+    if len(rows) > 25:
+        lines.append(f"...and {len(rows) - 25} more")
 
     return "\n".join(lines)
 
@@ -1163,6 +1208,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
