@@ -70,6 +70,18 @@ def fmt_hm(total_minutes: int):
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
+
+def get_user_role(cur, sender_id: str):
+    cur.execute("""
+        SELECT role
+        FROM users
+        WHERE messenger_id = %s
+    """, (sender_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return row.get("role", "student")
+
 # =========================================================
 # Messenger
 # =========================================================
@@ -364,10 +376,27 @@ def webhook():
                         # if no session, just give guidance
                         send_message(sender_id, "No active registration. Reply REGISTER to start.")
                         return "ok", 200
+
+                    # ==========================
+                    # ADMIN COMMANDS
+                    # ==========================
+                    if text.startswith("ADMIN"):
+                        role = get_user_role(cur, sender_id)
+                        if role != "admin":
+                            send_message(sender_id, "⛔ Admin access required.")
+                            return "ok", 200
+
+                        if text == "ADMIN MISSING TODAY":
+                            msg = handle_admin_missing_today(cur, today_ph)
+                            send_message(sender_id, msg)
+                            return "ok", 200
+
+                        send_message(sender_id, "Admin commands:\n• ADMIN MISSING TODAY")
+                        return "ok", 200
                         
 
                     # ==========================
-                    # Commands
+                    # STUDENT COMMANDS
                     # ==========================
 
                     if text not in ("REGISTER", "HELP", "TIME IN", "TIME OUT", "STATUS"):
@@ -642,6 +671,31 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
         f"• Late count: {late_count}"
     )
 
+def handle_admin_missing_today(cur, today_ph: date) -> str:
+    cur.execute("""
+        SELECT u.full_name, u.student_id, u.section
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND r.time_out IS NULL
+        ORDER BY u.section, u.full_name
+    """, (today_ph,))
+    rows = cur.fetchall()
+
+    if not rows:
+        return f"✅ No students missing TIME OUT for {today_ph}."
+
+    lines = [f"⚠️ Missing TIME OUT ({today_ph}):"]
+    for r in rows:
+        lines.append(
+            f"- {r.get('full_name','')} "
+            f"({r.get('student_id','')}) "
+            f"[{r.get('section','')}]"
+        )
+
+    return "\n".join(lines)
+
 # =========================================================
 # Home
 # =========================================================
@@ -649,6 +703,7 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
