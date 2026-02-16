@@ -169,9 +169,9 @@ def webhook():
 
 @app.route("/cron/remind-missing-timeout", methods=["GET"])
 def cron_remind_missing_timeout():
-    # Auth check
-    auth = request.headers.get("X-CRON-SECRET", "")
-    if not CRON_SECRET or auth != CRON_SECRET:
+
+    secret = request.args.get("secret", "")
+    if not CRON_SECRET or secret != CRON_SECRET:
         return "unauthorized", 401
 
     today_ph = datetime.now(PH_TZ).date()
@@ -413,6 +413,7 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
