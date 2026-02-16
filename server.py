@@ -720,6 +720,90 @@ def handle_admin_missing_today(cur, today_ph: date) -> str:
 
     return "\n".join(lines)
 
+def handle_admin_summary(cur, today_ph: date) -> str:
+    # Total students
+    cur.execute("SELECT COUNT(*) AS total FROM users WHERE COALESCE(role,'student')='student'")
+    total_students = int(cur.fetchone()["total"])
+
+    # Timed in today
+    cur.execute("""
+        SELECT COUNT(DISTINCT user_id) AS count
+        FROM dtr_records
+        WHERE date = %s AND time_in IS NOT NULL
+    """, (today_ph,))
+    timed_in_today = int(cur.fetchone()["count"])
+
+    # Missing time-out today
+    cur.execute("""
+        SELECT COUNT(*) AS count
+        FROM dtr_records
+        WHERE date = %s AND time_in IS NOT NULL AND time_out IS NULL
+    """, (today_ph,))
+    missing_today = int(cur.fetchone()["count"])
+
+    # Late today
+    cur.execute("""
+        SELECT COUNT(*) AS count
+        FROM dtr_records
+        WHERE date = %s AND is_late = TRUE
+    """, (today_ph,))
+    late_today = int(cur.fetchone()["count"])
+
+    # Risk + completion
+    cur.execute("""
+        SELECT 
+            u.id,
+            u.required_hours,
+            u.start_date,
+            u.end_date,
+            COALESCE(SUM(COALESCE(r.minutes_worked,0)),0) AS total_minutes
+        FROM users u
+        LEFT JOIN dtr_records r ON r.user_id = u.id
+        WHERE COALESCE(u.role,'student')='student'
+        GROUP BY u.id
+    """)
+    rows = cur.fetchall()
+
+    at_risk = 0
+    completed = 0
+
+    for r in rows:
+        required_hours = int(r["required_hours"] or 240)
+        total_minutes = int(r["total_minutes"])
+        accumulated_hours = total_minutes / 60
+
+        start = r["start_date"]
+        end = r["end_date"]
+        if not start or not end:
+            continue
+
+        total_days = (end - start).days
+        if total_days <= 0:
+            continue
+
+        days_elapsed = (today_ph - start).days
+        if days_elapsed < 0:
+            days_elapsed = 0
+        if days_elapsed > total_days:
+            days_elapsed = total_days
+
+        expected_hours = (days_elapsed / total_days) * required_hours
+
+        if accumulated_hours >= required_hours:
+            completed += 1
+        elif accumulated_hours < expected_hours:
+            at_risk += 1
+
+    return (
+        f"📊 OJT Dashboard ({today_ph})\n\n"
+        f"👥 Students: {total_students}\n"
+        f"🟢 Timed In Today: {timed_in_today}\n"
+        f"⚠️ Missing TIME OUT: {missing_today}\n"
+        f"⏰ Late Today: {late_today}\n\n"
+        f"🎯 Completed: {completed}\n"
+        f"🚨 At Risk: {at_risk}"
+    )
+
 def handle_admin_student(cur, today_ph: date, student_id_input: str) -> str:
 
     # Find student
@@ -812,6 +896,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
