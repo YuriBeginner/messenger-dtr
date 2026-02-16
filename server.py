@@ -409,8 +409,8 @@ def webhook():
 
                         parts = text.split()
                         if len(parts) != 3:
-                        send_message(sender_id, "Usage: ADMIN STUDENT <student_id>")
-                        return "ok", 200
+                            send_message(sender_id, "Usage: ADMIN STUDENT <student_id>")
+                            return "ok", 200
 
                         student_id_input = parts[2]
                         msg = handle_admin_student(cur, today_ph, student_id_input)
@@ -811,6 +811,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
