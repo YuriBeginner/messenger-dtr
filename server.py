@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, render_template
 from datetime import datetime, timezone, timedelta, date
 import os
 import psycopg2
@@ -804,9 +804,14 @@ def handle_admin_student(cur, today_ph: date, student_id_input: str) -> str:
 # Home
 # =========================================================
 
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
