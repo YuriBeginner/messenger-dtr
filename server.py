@@ -11,6 +11,7 @@ app = Flask(__name__)
 VERIFY_TOKEN = "ojt_dtr_token"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
+CRON_SECRET = os.environ.get("CRON_SECRET")
 
 PH_TZ = timezone(timedelta(hours=8))
 OFFICIAL_START_HOUR = 8
@@ -160,6 +161,63 @@ def webhook():
         print("Webhook error:", e)
 
     return "ok", 200
+
+    # =========================================================
+    # CRON SECRET
+    # =========================================================
+
+
+@app.route("/cron/remind-missing-timeout", methods=["POST"])
+def cron_remind_missing_timeout():
+    # Auth check
+    auth = request.headers.get("X-CRON-SECRET", "")
+    if not CRON_SECRET or auth != CRON_SECRET:
+        return "unauthorized", 401
+
+    today_ph = datetime.now(PH_TZ).date()
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Find students who timed in today but no time out yet
+                cur.execute("""
+                    SELECT u.id AS user_id, u.messenger_id, u.full_name
+                    FROM dtr_records r
+                    JOIN users u ON u.id = r.user_id
+                    WHERE r.date = %s
+                      AND r.time_in IS NOT NULL
+                      AND r.time_out IS NULL
+                """, (today_ph,))
+                rows = cur.fetchall()
+
+                sent = 0
+                for row in rows:
+                    # Insert reminder log (skip if already reminded)
+                    cur.execute("""
+                        INSERT INTO reminder_logs (user_id, date, reminder_type)
+                        VALUES (%s, %s, %s)
+                        ON CONFLICT DO NOTHING
+                    """, (row["user_id"], today_ph, "missing_time_out_6pm"))
+
+                    if cur.rowcount == 0:
+                        continue  # already reminded today
+
+                    name = row.get("full_name") or ""
+                    msg = (
+                        f"⏰ Reminder{name and f', {name}'}: You still have no TIME OUT recorded for today.\n"
+                        f"Reply: TIME OUT"
+                    )
+                    send_message(row["messenger_id"], msg)
+                    sent += 1
+
+        return {"date": str(today_ph), "targets": len(rows), "sent": sent}, 200
+
+    except Exception as e:
+        print("cron reminder error:", e)
+        return "error", 500
+    finally:
+        conn.close()
 
 # =========================================================
 # Core handlers (minimal)
@@ -355,6 +413,7 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
