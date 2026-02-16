@@ -1,10 +1,18 @@
-from flask import Flask, request, render_template
-from datetime import datetime, timezone, timedelta, date
+import csv
+import io
+import hmac
+import hashlib
+import base64
+import time
+import requests
+import json
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import requests
-import json
+from flask import Response
+from flask import Flask, request, render_template
+from datetime import datetime, timezone, timedelta, date
+
 
 app = Flask(__name__)
 
@@ -12,12 +20,14 @@ VERIFY_TOKEN = "ojt_dtr_token"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 CRON_SECRET = os.environ.get("CRON_SECRET")
+EXPORT_SECRET = os.environ.get("EXPORT_SECRET", "")
 
 PH_TZ = timezone(timedelta(hours=8))
 OFFICIAL_START_HOUR = 8
 OFFICIAL_START_MINUTE = 0
 GRACE_MINUTES = 10  # grace period for lateness
 REG_SESSION_EXPIRY_MINUTES = 15
+EXPORT_TOKEN_TTL_SECONDS = 300  # 5 minutes
 
 # =========================================================
 # Time + late helpers
@@ -62,6 +72,45 @@ def fmt_hm(total_minutes: int):
     h = total_minutes // 60
     m = total_minutes % 60
     return f"{h}h {m}m"
+
+# =========================================================
+# Secure Download Link Helper
+# =========================================================
+
+def _b64url_encode(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).decode("utf-8").rstrip("=")
+
+def _b64url_decode(s: str) -> bytes:
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+def make_export_token(payload: dict) -> str:
+    if not EXPORT_SECRET:
+        raise RuntimeError("EXPORT_SECRET not set")
+
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    sig = hmac.new(EXPORT_SECRET.encode("utf-8"), body, hashlib.sha256).digest()
+    return f"{_b64url_encode(body)}.{_b64url_encode(sig)}"
+
+def verify_export_token(token: str) -> dict | None:
+    try:
+        if not EXPORT_SECRET:
+            return None
+        b64_body, b64_sig = token.split(".", 1)
+        body = _b64url_decode(b64_body)
+        sig = _b64url_decode(b64_sig)
+
+        expected = hmac.new(EXPORT_SECRET.encode("utf-8"), body, hashlib.sha256).digest()
+        if not hmac.compare_digest(sig, expected):
+            return None
+
+        payload = json.loads(body.decode("utf-8"))
+        exp = int(payload.get("exp", 0))
+        if int(time.time()) > exp:
+            return None
+        return payload
+    except Exception:
+        return None
 
 # =========================================================
 # Database
@@ -515,6 +564,92 @@ def webhook():
     return "ok", 200
 
 # =========================================================
+# CSV Download Route
+# =========================================================
+@app.route("/export/class")
+def export_class_csv():
+    token = request.args.get("token", "")
+    payload = verify_export_token(token)
+    if not payload:
+        return "unauthorized", 401
+
+    # payload fields
+    course = payload["course"]
+    section = payload["section"]
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # Export per student summary + compliance columns
+                cur.execute("""
+                    SELECT
+                        u.full_name,
+                        u.student_id,
+                        u.course,
+                        u.section,
+                        u.company_name,
+                        u.required_hours,
+                        u.start_date,
+                        u.end_date,
+                        COALESCE(SUM(COALESCE(r.minutes_worked,0)),0) AS total_minutes,
+                        SUM(CASE WHEN r.is_late = TRUE THEN 1 ELSE 0 END) AS late_count,
+                        SUM(CASE WHEN r.time_in IS NOT NULL AND r.time_out IS NULL THEN 1 ELSE 0 END) AS missing_timeout_count
+                    FROM users u
+                    LEFT JOIN dtr_records r ON r.user_id = u.id
+                    WHERE COALESCE(u.role,'student')='student'
+                      AND UPPER(u.course) = %s
+                      AND UPPER(u.section) = %s
+                    GROUP BY u.id
+                    ORDER BY u.full_name
+                """, (course.upper(), section.upper()))
+                rows = cur.fetchall()
+
+        # Build CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Full Name","Student ID","Course","Section","Company",
+            "Required Hours","Start Date","End Date",
+            "Accumulated Hours","Remaining Hours",
+            "Late Count","Missing Time-outs"
+        ])
+
+        for r in rows:
+            required_hours = int(r["required_hours"] or 240)
+            total_minutes = int(r["total_minutes"] or 0)
+            acc_hours = total_minutes / 60.0
+            remaining = max(0.0, required_hours - acc_hours)
+
+            writer.writerow([
+                r.get("full_name",""),
+                r.get("student_id",""),
+                r.get("course",""),
+                r.get("section",""),
+                r.get("company_name",""),
+                required_hours,
+                r.get("start_date",""),
+                r.get("end_date",""),
+                f"{acc_hours:.2f}",
+                f"{remaining:.2f}",
+                int(r.get("late_count") or 0),
+                int(r.get("missing_timeout_count") or 0),
+            ])
+
+        csv_data = output.getvalue()
+        filename = f"OJT_{course.upper()}_{section.upper()}_export.csv"
+
+        return Response(
+            csv_data,
+            mimetype="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    finally:
+        conn.close()
+
+# =========================================================
 # Cron reminder (GET + secret query param)
 # =========================================================
 
@@ -746,6 +881,11 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
         f"• Latest missing date: {latest_text}\n"
         f"• Late count: {late_count}"
     )
+
+
+# =========================================================
+# ADMIN handlers
+# =========================================================
 
 def handle_admin_missing_today(cur, today_ph: date, course: str = None, section: str = None) -> str:
     where = ["r.date = %s", "r.time_in IS NOT NULL", "r.time_out IS NULL"]
@@ -1197,6 +1337,33 @@ def handle_admin_class(cur, today_ph: date, course: str, section: str) -> str:
             lines.append(f"- {name} ({sid}): {acc:.1f}h vs expected {exp:.1f}h (-{gap:.1f}h)")
 
     return "\n".join(lines)
+
+    #ADMIN EXPORT CLASS <course> <section>
+
+    if cmd.startswith("ADMIN EXPORT CLASS "):
+    parts = cmd.split()
+    # ADMIN EXPORT CLASS <COURSE> <SECTION>
+    if len(parts) != 5:
+        send_message(sender_id, "Usage: ADMIN EXPORT CLASS <course> <section>\nExample: ADMIN EXPORT CLASS BSECE 4B")
+        return "ok", 200
+
+    course = parts[3].upper()
+    section = parts[4].upper()
+
+    payload = {
+        "course": course,
+        "section": section,
+        "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS
+    }
+    token = make_export_token(payload)
+    link = f"https://{request.host}/export/class?token={token}"
+
+    send_message(
+        sender_id,
+        "📄 Export ready (valid for 5 minutes):\n"
+        f"{link}"
+    )
+    return "ok", 200
 # =========================================================
 # Home
 # =========================================================
@@ -1208,6 +1375,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
