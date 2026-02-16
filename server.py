@@ -593,3 +593,4 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
