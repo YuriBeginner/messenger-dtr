@@ -1341,7 +1341,7 @@ def handle_admin_class(cur, today_ph: date, course: str, section: str) -> str:
     #ADMIN EXPORT CLASS <course> <section>
 
     if cmd.startswith("ADMIN EXPORT CLASS "):
-    parts = cmd.split()
+        parts = cmd.split()
     # ADMIN EXPORT CLASS <COURSE> <SECTION>
     if len(parts) != 5:
         send_message(sender_id, "Usage: ADMIN EXPORT CLASS <course> <section>\nExample: ADMIN EXPORT CLASS BSECE 4B")
@@ -1375,6 +1375,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
