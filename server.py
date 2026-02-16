@@ -17,6 +17,7 @@ PH_TZ = timezone(timedelta(hours=8))
 OFFICIAL_START_HOUR = 8
 OFFICIAL_START_MINUTE = 0
 GRACE_MINUTES = 10  # grace period for lateness
+REG_SESSION_EXPIRY_MINUTES = 15
 
 # =========================================================
 # Time + late helpers
@@ -86,14 +87,41 @@ def send_message(psid: str, message: str):
 # =========================================================
 # Guided Registration (DB-backed state)
 # =========================================================
+def is_registered(cur, sender_id: str) -> bool:
+    cur.execute("SELECT 1 FROM users WHERE messenger_id=%s", (sender_id,))
+    return cur.fetchone() is not None
+
+def reg_cleanup_expired(cur):
+    cur.execute("""
+        DELETE FROM registration_sessions
+        WHERE updated_at < now() - (%s || ' minutes')::interval
+    """, (REG_SESSION_EXPIRY_MINUTES,))
 
 def reg_get_session(cur, messenger_id: str):
     cur.execute("""
-        SELECT messenger_id, step, data
+        SELECT messenger_id, step, data, updated_at
         FROM registration_sessions
         WHERE messenger_id = %s
     """, (messenger_id,))
-    return cur.fetchone()
+    sess = cur.fetchone()
+    if not sess:
+        return None
+
+    # Expire after REG_SESSION_EXPIRY_MINUTES
+    cur.execute("""
+        SELECT (now() - %s::timestamptz) > (%s || ' minutes')::interval AS is_expired
+    """, (sess["updated_at"], REG_SESSION_EXPIRY_MINUTES))
+    expired = cur.fetchone()["is_expired"]
+
+    if expired:
+        reg_delete_session(cur, messenger_id)
+        return None
+
+    return sess
+
+def reg_had_session(cur, messenger_id: str) -> bool:
+    cur.execute("SELECT 1 FROM registration_sessions WHERE messenger_id=%s", (messenger_id,))
+    return cur.fetchone() is not None
 
 def reg_set_session(cur, messenger_id: str, step: str, data: dict):
     cur.execute("""
@@ -102,6 +130,8 @@ def reg_set_session(cur, messenger_id: str, step: str, data: dict):
         ON CONFLICT (messenger_id)
         DO UPDATE SET step = EXCLUDED.step, data = EXCLUDED.data, updated_at = now()
     """, (messenger_id, step, json.dumps(data)))
+
+
 
 def reg_delete_session(cur, messenger_id: str):
     cur.execute("DELETE FROM registration_sessions WHERE messenger_id = %s", (messenger_id,))
@@ -234,7 +264,8 @@ def handle_registration(cur, sender_id: str, raw_text: str) -> str:
                 data["end_date"]
             ))
             reg_delete_session(cur, sender_id)
-            return "✅ Registration successful! Commands: TIME IN, TIME OUT, STATUS"
+            return "✅ Registration successful!:n"
+                   "Commands: TIME IN, TIME OUT, STATUS"
 
         if txt.upper() == "NO":
             reg_delete_session(cur, sender_id)
@@ -272,6 +303,7 @@ def webhook():
 
         if "message" not in messaging or "text" not in messaging["message"]:
             return "ok", 200
+            
 
         message_id = messaging["message"]["mid"]
         sender_id = messaging["sender"]["id"]
@@ -295,6 +327,8 @@ def webhook():
                     if cur.rowcount == 0:
                         return "ok", 200  # duplicate delivery ignored
 
+                    reg_cleanup_expired(cur)
+
                     # ==========================
                     # Guided registration session takes priority
                     # ==========================
@@ -304,6 +338,22 @@ def webhook():
                         if reply:
                             send_message(sender_id, reply)
                             return "ok", 200
+
+                    # If user not registered, guide them (discoverability)
+                    if not is_registered(cur, sender_id):
+                        if text == "REGISTER":
+                            send_message(sender_id, start_registration(cur, sender_id))
+                            return "ok", 200
+
+                        # If they are mid-registration, that was handled earlier.
+                        send_message(
+                            sender_id,
+                            "👋 Welcome! This is the OJT Attendance Bot.\n\n"
+                            "To get started, reply: REGISTER\n"
+                            "After registration, you can use: TIME IN, TIME OUT, STATUS\n"
+                            "Type HELP anytime."
+                        )
+                        return "ok", 200
 
                     # Start registration
                     if text == "REGISTER":
@@ -315,10 +365,16 @@ def webhook():
                         # if no session, just give guidance
                         send_message(sender_id, "No active registration. Reply REGISTER to start.")
                         return "ok", 200
+                        
 
                     # ==========================
                     # Commands
                     # ==========================
+
+                    if text not in ("REGISTER", "HELP", "TIME IN", "TIME OUT", "STATUS"):
+                        send_message(sender_id, "If you were registering earlier, your session may have expired. Reply REGISTER to start again.")
+                        return "ok", 200
+    
                     if text == "STATUS":
                         msg = handle_status(cur, sender_id, today_ph)
                         send_message(sender_id, msg)
@@ -333,12 +389,13 @@ def webhook():
                         send_message(
                             sender_id,
                             "Commands:\n"
-                            "• REGISTER (guided)\n"
+                            "• REGISTER (start)\n"
                             "• TIME IN\n"
                             "• TIME OUT\n"
                             "• STATUS\n"
-                            "• CANCEL (during registration)\n"
-                            "• RESTART (during registration)"
+                            "During registration:\n"
+                            "• CANCEL\n"
+                            "• RESTART"
                         )
                         return "ok", 200
 
@@ -593,4 +650,5 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
