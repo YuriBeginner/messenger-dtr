@@ -441,7 +441,7 @@ def webhook():
                             "• ADMIN MISSING TODAY\n"
                             "• ADMIN STUDENT <student_id>"
                             "• ADMIN SECTION <section>"
-                            "• ADMIN SECTION <course> <section>"
+                            "• ADMIN CLASS <course> <section>"
                         )
                         
                         return "ok", 200
@@ -1163,6 +1163,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
