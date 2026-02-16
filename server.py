@@ -386,38 +386,39 @@ def webhook():
                             send_message(sender_id, "⛔ Admin access required.")
                             return "ok", 200
 
-                        if text == "ADMIN MISSING TODAY":
+                        # Normalize spacing so "ADMIN   SUMMARY" still works
+                        cmd = " ".join(text.split())
+
+                        if cmd == "ADMIN SUMMARY":
+                            msg = handle_admin_summary(cur, today_ph)
+                            send_message(sender_id, msg)
+                            return "ok", 200
+
+                        if cmd == "ADMIN MISSING TODAY":
                             msg = handle_admin_missing_today(cur, today_ph)
                             send_message(sender_id, msg)
                             return "ok", 200
 
-                    send_message(
-                        sender_id,
-                        "Admin commands:\n"
-                        "• ADMIN SUMMARY\n"
-                        "• ADMIN MISSING TODAY\n"
-                        "• ADMIN STUDENT <student_id>\n"
-                    )
-                    return "ok", 200
-                    
-                    if text.startswith("ADMIN STUDENT"):
+                        if cmd.startswith("ADMIN STUDENT "):
+                            student_id_input = cmd[len("ADMIN STUDENT "):].strip()
+                            if not student_id_input:
+                                send_message(sender_id, "Usage: ADMIN STUDENT <student_id>")
+                                return "ok", 200
 
-                        role = get_user_role(cur, sender_id)
-                        if role != "admin":
-                            send_message(sender_id, "⛔ Admin access required.")
+                            msg = handle_admin_student(cur, today_ph, student_id_input)
+                            send_message(sender_id, msg)
                             return "ok", 200
 
-                        parts = text.split()
-                        if len(parts) != 3:
-                            send_message(sender_id, "Usage: ADMIN STUDENT <student_id>")
-                            return "ok", 200
-
-                        student_id_input = parts[2]
-                        msg = handle_admin_student(cur, today_ph, student_id_input)
-                        send_message(sender_id, msg)
+                        # Help / fallback
+                        send_message(
+                            sender_id,
+                            "Admin commands:\n"
+                            "• ADMIN SUMMARY\n"
+                            "• ADMIN MISSING TODAY\n"
+                            "• ADMIN STUDENT <student_id>"
+                        )
                         return "ok", 200
                         
-
                     # ==========================
                     # STUDENT COMMANDS
                     # ==========================
@@ -811,6 +812,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
