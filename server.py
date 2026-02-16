@@ -391,8 +391,31 @@ def webhook():
                             send_message(sender_id, msg)
                             return "ok", 200
 
-                        send_message(sender_id, "Admin commands:\n• ADMIN MISSING TODAY")
+                    send_message(
+                        sender_id,
+                        "Admin commands:\n"
+                        "• ADMIN SUMMARY\n"
+                        "• ADMIN MISSING TODAY\n"
+                        "• ADMIN STUDENT <student_id>\n"
+                    )
+                    return "ok", 200
+                    
+                    if text.startswith("ADMIN STUDENT"):
+
+                    role = get_user_role(cur, sender_id)
+                    if role != "admin":
+                        send_message(sender_id, "⛔ Admin access required.")
                         return "ok", 200
+
+                    parts = text.split()
+                    if len(parts) != 3:
+                        send_message(sender_id, "Usage: ADMIN STUDENT <student_id>")
+                        return "ok", 200
+
+                    student_id_input = parts[2]
+                    msg = handle_admin_student(cur, today_ph, student_id_input)
+                    send_message(sender_id, msg)
+                    return "ok", 200
                         
 
                     # ==========================
@@ -696,6 +719,87 @@ def handle_admin_missing_today(cur, today_ph: date) -> str:
 
     return "\n".join(lines)
 
+def handle_admin_student(cur, today_ph: date, student_id_input: str) -> str:
+
+    # Find student
+    cur.execute("""
+        SELECT id, full_name, student_id, section,
+               required_hours, start_date, end_date
+        FROM users
+        WHERE student_id = %s
+          AND role = 'student'
+    """, (student_id_input,))
+    student = cur.fetchone()
+
+    if not student:
+        return "❌ Student not found."
+
+    user_id = student["id"]
+    required_hours = int(student["required_hours"] or 240)
+
+    # Total accumulated minutes
+    cur.execute("""
+        SELECT COALESCE(SUM(COALESCE(minutes_worked,0)),0) AS total_minutes
+        FROM dtr_records
+        WHERE user_id = %s
+    """, (user_id,))
+    total_minutes = int(cur.fetchone()["total_minutes"])
+    accumulated_hours = total_minutes / 60
+
+    # Late count
+    cur.execute("""
+        SELECT COUNT(*) AS late_count
+        FROM dtr_records
+        WHERE user_id = %s
+          AND is_late = TRUE
+    """, (user_id,))
+    late_count = int(cur.fetchone()["late_count"])
+
+    # Missing time-outs
+    cur.execute("""
+        SELECT COUNT(*) AS missing_count
+        FROM dtr_records
+        WHERE user_id = %s
+          AND time_in IS NOT NULL
+          AND time_out IS NULL
+    """, (user_id,))
+    missing_count = int(cur.fetchone()["missing_count"])
+
+    # Risk detection
+    start = student["start_date"]
+    end = student["end_date"]
+
+    risk_status = "Unknown"
+    if start and end:
+        total_days = (end - start).days
+        days_elapsed = (today_ph - start).days
+
+        if total_days > 0 and days_elapsed > 0:
+            expected_hours = (days_elapsed / total_days) * required_hours
+
+            if accumulated_hours >= required_hours:
+                risk_status = "✅ Completed"
+            elif accumulated_hours < expected_hours:
+                risk_status = "🚨 At Risk"
+            else:
+                risk_status = "🟢 On Track"
+
+    remaining_hours = max(0, required_hours - accumulated_hours)
+
+    return (
+        f"👤 Student Overview\n\n"
+        f"Name: {student['full_name']}\n"
+        f"Student ID: {student['student_id']}\n"
+        f"Section: {student['section']}\n\n"
+        f"OJT Period: {start} to {end}\n\n"
+        f"📊 Progress\n"
+        f"• Accumulated: {accumulated_hours:.1f}h\n"
+        f"• Remaining: {remaining_hours:.1f}h (of {required_hours}h)\n"
+        f"• Late Count: {late_count}\n"
+        f"• Missing Time-outs: {missing_count}\n\n"
+        f"🎯 Status: {risk_status}"
+    )
+
 # =========================================================
 # Home
 # =========================================================
@@ -703,6 +807,7 @@ def handle_admin_missing_today(cur, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
