@@ -402,20 +402,20 @@ def webhook():
                     
                     if text.startswith("ADMIN STUDENT"):
 
-                    role = get_user_role(cur, sender_id)
-                    if role != "admin":
-                        send_message(sender_id, "⛔ Admin access required.")
-                        return "ok", 200
+                        role = get_user_role(cur, sender_id)
+                        if role != "admin":
+                            send_message(sender_id, "⛔ Admin access required.")
+                            return "ok", 200
 
-                    parts = text.split()
-                    if len(parts) != 3:
+                        parts = text.split()
+                        if len(parts) != 3:
                         send_message(sender_id, "Usage: ADMIN STUDENT <student_id>")
                         return "ok", 200
 
-                    student_id_input = parts[2]
-                    msg = handle_admin_student(cur, today_ph, student_id_input)
-                    send_message(sender_id, msg)
-                    return "ok", 200
+                        student_id_input = parts[2]
+                        msg = handle_admin_student(cur, today_ph, student_id_input)
+                        send_message(sender_id, msg)
+                        return "ok", 200
                         
 
                     # ==========================
@@ -807,6 +807,7 @@ def handle_admin_student(cur, today_ph: date, student_id_input: str) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
