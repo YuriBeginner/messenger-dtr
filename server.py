@@ -409,6 +409,20 @@ def webhook():
                             send_message(sender_id, msg)
                             return "ok", 200
 
+                        if cmd.startswith("ADMIN CLASS "):
+                            parts = cmd.split()
+                            # ADMIN CLASS <COURSE> <SECTION>
+                            if len(parts) != 4:
+                                send_message(sender_id, "Usage: ADMIN CLASS <course> <section>\nExample: ADMIN CLASS BSECE 4B")
+                                return "ok", 200
+
+                            course = parts[2].strip().upper()
+                            section = parts[3].strip().upper()
+
+                            msg = handle_admin_class(cur, today_ph, course, section)
+                            send_message(sender_id, msg)
+                            return "ok", 200
+
                         if cmd.startswith("ADMIN STUDENT "):
                             student_id_input = cmd[len("ADMIN STUDENT "):].strip()
                             if not student_id_input:
@@ -427,6 +441,7 @@ def webhook():
                             "• ADMIN MISSING TODAY\n"
                             "• ADMIN STUDENT <student_id>"
                             "• ADMIN SECTION <section>"
+                            "• ADMIN SECTION <course> <section>"
                         )
                         
                         return "ok", 200
@@ -1019,6 +1034,124 @@ def handle_admin_section(cur, today_ph: date, section: str) -> str:
             lines.append(f"- {name} ({sid}): {acc:.1f}h vs expected {exp:.1f}h (-{gap:.1f}h)")
 
     return "\n".join(lines)
+
+def handle_admin_class(cur, today_ph: date, course: str, section: str) -> str:
+    course = course.upper().strip()
+    section = section.upper().strip()
+
+    # Total students
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM users
+        WHERE COALESCE(role,'student')='student'
+          AND UPPER(course) = %s
+          AND UPPER(section) = %s
+    """, (course, section))
+    total_students = int(cur.fetchone()["total"])
+
+    if total_students == 0:
+        return f"❌ No students found in {course} {section}."
+
+    # Timed in today
+    cur.execute("""
+        SELECT COUNT(*) AS count
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND UPPER(u.course) = %s
+          AND UPPER(u.section) = %s
+    """, (today_ph, course, section))
+    timed_in_today = int(cur.fetchone()["count"])
+
+    # Missing time-out today list
+    cur.execute("""
+        SELECT u.full_name, u.student_id
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND r.time_out IS NULL
+          AND UPPER(u.course) = %s
+          AND UPPER(u.section) = %s
+        ORDER BY u.full_name
+    """, (today_ph, course, section))
+    missing_rows = cur.fetchall()
+
+    # Risk detection + completion
+    cur.execute("""
+        SELECT 
+            u.id, u.full_name, u.student_id,
+            u.required_hours, u.start_date, u.end_date,
+            COALESCE(SUM(COALESCE(r.minutes_worked,0)),0) AS total_minutes
+        FROM users u
+        LEFT JOIN dtr_records r ON r.user_id = u.id
+        WHERE COALESCE(u.role,'student')='student'
+          AND UPPER(u.course) = %s
+          AND UPPER(u.section) = %s
+        GROUP BY u.id
+    """, (course, section))
+    rows = cur.fetchall()
+
+    at_risk = 0
+    completed = 0
+    behind_list = []
+
+    for r in rows:
+        required_hours = int(r["required_hours"] or 240)
+        accumulated_hours = int(r["total_minutes"]) / 60
+
+        start = r["start_date"]
+        end = r["end_date"]
+        if not start or not end:
+            continue
+
+        total_days = (end - start).days
+        if total_days <= 0:
+            continue
+
+        days_elapsed = (today_ph - start).days
+        days_elapsed = max(0, min(days_elapsed, total_days))
+
+        expected_hours = (days_elapsed / total_days) * required_hours
+
+        if accumulated_hours >= required_hours:
+            completed += 1
+        elif accumulated_hours < expected_hours:
+            at_risk += 1
+            gap = expected_hours - accumulated_hours
+            behind_list.append((gap, r["full_name"], r["student_id"], accumulated_hours, expected_hours))
+
+    behind_list.sort(reverse=True)
+    top_behind = behind_list[:5]
+
+    missing_count = len(missing_rows)
+
+    lines = [
+        f"📌 Class Dashboard: {course} {section} ({today_ph})",
+        "",
+        f"👥 Students: {total_students}",
+        f"🟢 Timed In Today: {timed_in_today}",
+        f"⚠️ Missing TIME OUT: {missing_count}",
+        f"🎯 Completed: {completed}",
+        f"🚨 At Risk: {at_risk}",
+    ]
+
+    if missing_count > 0:
+        lines.append("")
+        lines.append("⚠️ Missing TIME OUT list:")
+        for r in missing_rows[:10]:
+            lines.append(f"- {r.get('full_name','')} ({r.get('student_id','')})")
+        if missing_count > 10:
+            lines.append(f"...and {missing_count - 10} more")
+
+    if top_behind:
+        lines.append("")
+        lines.append("🚨 Most Behind (Top 5):")
+        for gap, name, sid, acc, exp in top_behind:
+            lines.append(f"- {name} ({sid}): {acc:.1f}h vs expected {exp:.1f}h (-{gap:.1f}h)")
+
+    return "\n".join(lines)
 # =========================================================
 # Home
 # =========================================================
@@ -1030,6 +1163,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
