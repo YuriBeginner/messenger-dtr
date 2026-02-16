@@ -473,6 +473,23 @@ def webhook():
                             send_message(sender_id, msg)
                             return "ok", 200
 
+                        if cmd.startswith("ADMIN EXPORT CLASS "):
+                            parts = cmd.split()
+                            # ADMIN EXPORT CLASS <COURSE> <SECTION>
+                            if len(parts) != 5:
+                                send_message(sender_id, "Usage: ADMIN EXPORT CLASS <course> <section>\nExample: ADMIN EXPORT CLASS BSECE 4B")
+                                return "ok", 200
+
+                            course = parts[3].upper()
+                            section = parts[4].upper()
+
+                            payload = {"course": course, "section": section, "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS}
+                            token = make_export_token(payload)
+                            link = f"https://{request.host}/export/class?token={token}"
+
+                            send_message(sender_id, f"📄 Export ready (valid for 5 minutes):\n{link}")
+                            return "ok", 200
+
                         if cmd.startswith("ADMIN SECTION "):
                             section = cmd[len("ADMIN SECTION "):].strip()
                             if not section:
@@ -516,8 +533,8 @@ def webhook():
                             "  - optional filters: <course> or <course> <section>\n"
                             "  - example: ADMIN MISSING TODAY BSECE 4B\n"
                             "• ADMIN STUDENT <student_id>\n"
-                            "• ADMIN CLASS <course> <section>"
-                            "• ADMIN EXPORT CLASS <course> <section>"
+                            "• ADMIN CLASS <course> <section>\n"
+                            "• ADMIN EXPORT CLASS <course> <section>"                                                                                                                                                                                            
                         )
                         return "ok", 200
                         
@@ -1339,32 +1356,7 @@ def handle_admin_class(cur, today_ph: date, course: str, section: str) -> str:
 
     return "\n".join(lines)
 
-    #ADMIN EXPORT CLASS <course> <section>
 
-    if cmd.startswith("ADMIN EXPORT CLASS "):
-        parts = cmd.split()
-    # ADMIN EXPORT CLASS <COURSE> <SECTION>
-    if len(parts) != 5:
-        send_message(sender_id, "Usage: ADMIN EXPORT CLASS <course> <section>\nExample: ADMIN EXPORT CLASS BSECE 4B")
-        return "ok", 200
-
-    course = parts[3].upper()
-    section = parts[4].upper()
-
-    payload = {
-        "course": course,
-        "section": section,
-        "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS
-    }
-    token = make_export_token(payload)
-    link = f"https://{request.host}/export/class?token={token}"
-
-    send_message(
-        sender_id,
-        "📄 Export ready (valid for 5 minutes):\n"
-        f"{link}"
-    )
-    return "ok", 200
 # =========================================================
 # Home
 # =========================================================
@@ -1376,6 +1368,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
