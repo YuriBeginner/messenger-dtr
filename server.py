@@ -264,8 +264,7 @@ def handle_registration(cur, sender_id: str, raw_text: str) -> str:
                 data["end_date"]
             ))
             reg_delete_session(cur, sender_id)
-            return "✅ Registration successful!:n"
-                   f"Commands: TIME IN, TIME OUT, STATUS"
+            return "✅ Registration successful! Commands: TIME IN, TIME OUT, STATUS"
 
         if txt.upper() == "NO":
             reg_delete_session(cur, sender_id)
@@ -650,6 +649,7 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
