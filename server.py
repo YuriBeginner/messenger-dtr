@@ -1269,9 +1269,15 @@ def admin_dashboard():
 
                 log_admin_action(cur, admin_id, "PORTAL_DASHBOARD_VIEW", target=str(today_ph))
 
+        last_updated = datetime.now(PH_TZ).strftime("%I:%M %p")
+
         return render_template(
             "admin/dashboard.html",
-            today=today_ph,
+            page_title="Dashboard",
+            subtitle=str(today_ph),
+            last_updated=last_updated,
+            active_page="dashboard",
+
             total_students=total_students,
             timed_in_today=timed_in_today,
             missing_timeout_today=missing_timeout_today,
@@ -1279,8 +1285,10 @@ def admin_dashboard():
             completed=completed,
             high_risk=high_risk,
             med_risk=med_risk,
-            admin_name=session.get("admin_name","Admin")
+
+            admin_name=session.get("admin_name", "Admin")
         )
+
     finally:
         conn.close()
 
@@ -1341,6 +1349,11 @@ def admin_students():
 
         return render_template(
             "admin/students.html",
+            page_title="Students",
+            subtitle="Filter, search, and review progress",
+            last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
+            active_page="students",
+            
             students=rows,
             course=course,
             section=section,
@@ -1853,4 +1866,5 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
