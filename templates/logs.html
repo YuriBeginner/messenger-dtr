@@ -1,0 +1,22 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h3 class="mb-3">Admin Activity Logs</h3>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm mb-0">
+      <thead><tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Target</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.created_at }}</td>
+          <td>{{ r.full_name }}</td>
+          <td>{{ r.action }}</td>
+          <td>{{ r.target }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
