@@ -1,17 +1,95 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<h3 class="mb-3">Dashboard <span class="text-muted fs-6">({{ today }})</span></h3>
+<!-- “Live” feel: refresh every 60 seconds (calm, not spammy) -->
+<meta http-equiv="refresh" content="60">
 
 <div class="row g-3">
-  <div class="col-md-3"><div class="card p-3 shadow-sm"><div class="text-muted">Students</div><div class="fs-3">{{ total_students }}</div></div></div>
-  <div class="col-md-3"><div class="card p-3 shadow-sm"><div class="text-muted">Timed In Today</div><div class="fs-3">{{ timed_in_today }}</div></div></div>
-  <div class="col-md-3"><div class="card p-3 shadow-sm"><div class="text-muted">Missing Time-out</div><div class="fs-3">{{ missing_timeout_today }}</div></div></div>
-  <div class="col-md-3"><div class="card p-3 shadow-sm"><div class="text-muted">Late Today</div><div class="fs-3">{{ late_today }}</div></div></div>
+  <div class="col-md-3">
+    <div class="card-soft p-3 hover-lift">
+      <div class="metric">
+        <div class="label">Students</div>
+        <div class="value">{{ total_students }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="card-soft p-3 hover-lift">
+      <div class="metric">
+        <div class="label">Timed In Today</div>
+        <div class="value">{{ timed_in_today }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="card-soft p-3 hover-lift">
+      <div class="metric">
+        <div class="label">Missing Time-out</div>
+        <div class="value">{{ missing_timeout_today }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-3">
+    <div class="card-soft p-3 hover-lift">
+      <div class="metric">
+        <div class="label">Late Today</div>
+        <div class="value">{{ late_today }}</div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="row g-3 mt-1">
-  <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="text-muted">Completed</div><div class="fs-3">{{ completed }}</div></div></div>
-  <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="text-muted">High Risk</div><div class="fs-3">{{ high_risk }}</div></div></div>
-  <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="text-muted">Med Risk</div><div class="fs-3">{{ med_risk }}</div></div></div>
+  <div class="col-md-4">
+    <div class="card-soft p-3 hover-lift">
+      <div class="d-flex align-items-center justify-content-between">
+        <div class="metric">
+          <div class="label">Completed</div>
+          <div class="value">{{ completed }}</div>
+        </div>
+        <span class="badge-soft b-green">COMPLETE</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card-soft p-3 hover-lift">
+      <div class="d-flex align-items-center justify-content-between">
+        <div class="metric">
+          <div class="label">High Risk</div>
+          <div class="value">{{ high_risk }}</div>
+        </div>
+        <span class="badge-soft b-red">HIGH</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card-soft p-3 hover-lift">
+      <div class="d-flex align-items-center justify-content-between">
+        <div class="metric">
+          <div class="label">Med Risk</div>
+          <div class="value">{{ med_risk }}</div>
+        </div>
+        <span class="badge-soft b-yellow">MED</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="mt-4">
+  <div class="card-soft p-3">
+    <div class="d-flex align-items-center justify-content-between">
+      <div class="fw-bold">Quick Actions</div>
+      <div class="subtle">Most used admin workflows</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mt-3">
+      <a class="btn btn-dark btn-sm" href="/admin/students">View Students</a>
+      <a class="btn btn-outline-dark btn-sm" href="/admin/exports">Generate Export</a>
+      <a class="btn btn-outline-dark btn-sm" href="/admin/logs">View Logs</a>
+    </div>
+  </div>
 </div>
 {% endblock %}
