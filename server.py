@@ -12,6 +12,10 @@ from psycopg2.extras import RealDictCursor
 from flask import Response
 from flask import Flask, request, render_template
 from datetime import datetime, timezone, timedelta, date
+from flask import session, redirect, url_for, abort
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
+
 
 
 app = Flask(__name__)
@@ -21,6 +25,8 @@ PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 CRON_SECRET = os.environ.get("CRON_SECRET")
 EXPORT_SECRET = os.environ.get("EXPORT_SECRET", "")
+app.secret_key = os.environ.get("SECRET_KEY", "dev-unsafe-change-me")
+
 
 PH_TZ = timezone(timedelta(hours=8))
 OFFICIAL_START_HOUR = 8
@@ -339,6 +345,27 @@ def handle_registration(cur, sender_id: str, raw_text: str) -> str:
     # Fallback: reset session if unknown step
     reg_delete_session(cur, sender_id)
     return "⚠️ Registration session reset. Reply REGISTER to start again."
+
+
+# =========================================================
+# Log Admin Action
+# =========================================================
+
+def log_admin_action(cur, admin_user_id: int, action: str, target: str = None, metadata: dict = None):
+    metadata = metadata or {}
+    cur.execute("""
+        INSERT INTO admin_activity_logs (admin_user_id, action, target, metadata)
+        VALUES (%s, %s, %s, %s::jsonb)
+    """, (admin_user_id, action, target, json.dumps(metadata)))
+
+def admin_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if not session.get("admin_user_id"):
+            return redirect(url_for("admin_login"))
+        return view_func(*args, **kwargs)
+    return wrapper
+
 
 
 # =========================================================
@@ -1120,6 +1147,330 @@ def handle_status(cur, sender_id: str, today_ph: date) -> str:
         f"• Late count: {late_count}"
     )
 
+# =========================================================
+# ADMIN portal route
+# =========================================================
+
+# =========================================================
+# Log in/ Log out
+# =========================================================
+
+@app.route("/admin/login", methods=["GET", "POST"])
+def admin_login():
+    if request.method == "GET":
+        return render_template("admin/login.html", error=None)
+
+    email = (request.form.get("email") or "").strip().lower()
+    password = request.form.get("password") or ""
+
+    if not email or not password:
+        return render_template("admin/login.html", error="Email and password are required.")
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT id, full_name, role, password_hash
+                    FROM users
+                    WHERE lower(email) = %s
+                    LIMIT 1
+                """, (email,))
+                u = cur.fetchone()
+
+                if (not u) or (u.get("role") != "admin") or (not u.get("password_hash")):
+                    return render_template("admin/login.html", error="Invalid credentials.")
+
+                if not check_password_hash(u["password_hash"], password):
+                    return render_template("admin/login.html", error="Invalid credentials.")
+
+                session["admin_user_id"] = u["id"]
+                session["admin_name"] = u.get("full_name") or "Admin"
+
+                log_admin_action(cur, u["id"], "PORTAL_LOGIN")
+                return redirect(url_for("admin_dashboard"))
+    finally:
+        conn.close()
+
+
+@app.route("/admin/logout")
+@admin_required
+def admin_logout():
+    admin_id = session.get("admin_user_id")
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if admin_id:
+                    log_admin_action(cur, admin_id, "PORTAL_LOGOUT")
+    finally:
+        conn.close()
+
+    session.clear()
+    return redirect(url_for("admin_login"))
+
+# =========================================================
+# Dashboard
+# =========================================================
+@app.route("/admin/dashboard")
+@admin_required
+def admin_dashboard():
+    today_ph = datetime.now(PH_TZ).date()
+    admin_id = session["admin_user_id"]
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # totals
+                cur.execute("SELECT COUNT(*) AS c FROM users WHERE COALESCE(role,'student')='student'")
+                total_students = int(cur.fetchone()["c"])
+
+                cur.execute("""
+                    SELECT COUNT(DISTINCT user_id) AS c
+                    FROM dtr_records
+                    WHERE date = %s AND time_in IS NOT NULL
+                """, (today_ph,))
+                timed_in_today = int(cur.fetchone()["c"])
+
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM dtr_records
+                    WHERE date = %s AND time_in IS NOT NULL AND time_out IS NULL
+                """, (today_ph,))
+                missing_timeout_today = int(cur.fetchone()["c"])
+
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM dtr_records
+                    WHERE date = %s AND is_late = TRUE
+                """, (today_ph,))
+                late_today = int(cur.fetchone()["c"])
+
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM users
+                    WHERE COALESCE(role,'student')='student'
+                      AND completion_status = 'COMPLETE'
+                """)
+                completed = int(cur.fetchone()["c"])
+
+                # risk snapshot counts (if cron ran)
+                cur.execute("""
+                    SELECT
+                        SUM(CASE WHEN risk_level='HIGH' THEN 1 ELSE 0 END) AS high,
+                        SUM(CASE WHEN risk_level='MED' THEN 1 ELSE 0 END)  AS med
+                    FROM risk_snapshots
+                    WHERE snapshot_date = %s
+                """, (today_ph,))
+                rs = cur.fetchone() or {}
+                high_risk = int(rs.get("high") or 0)
+                med_risk = int(rs.get("med") or 0)
+
+                log_admin_action(cur, admin_id, "PORTAL_DASHBOARD_VIEW", target=str(today_ph))
+
+        return render_template(
+            "admin/dashboard.html",
+            today=today_ph,
+            total_students=total_students,
+            timed_in_today=timed_in_today,
+            missing_timeout_today=missing_timeout_today,
+            late_today=late_today,
+            completed=completed,
+            high_risk=high_risk,
+            med_risk=med_risk,
+            admin_name=session.get("admin_name","Admin")
+        )
+    finally:
+        conn.close()
+
+# =========================================================
+# Student List
+# =========================================================
+@app.route("/admin/students")
+@admin_required
+def admin_students():
+    admin_id = session["admin_user_id"]
+    course = (request.args.get("course") or "").strip().upper()
+    section = (request.args.get("section") or "").strip().upper()
+    q = (request.args.get("q") or "").strip()
+
+    where = ["COALESCE(u.role,'student')='student'"]
+    params = []
+
+    if course:
+        where.append("UPPER(u.course) = %s")
+        params.append(course)
+    if section:
+        where.append("UPPER(u.section) = %s")
+        params.append(section)
+    if q:
+        where.append("(u.student_id ILIKE %s OR u.full_name ILIKE %s)")
+        params.extend([f"%{q}%", f"%{q}%"])
+
+    where_sql = " AND ".join(where)
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(f"""
+                    SELECT
+                        u.id, u.full_name, u.student_id, u.course, u.section,
+                        u.required_hours, u.completion_status,
+                        COALESCE(SUM(COALESCE(r.minutes_worked,0)),0) AS total_minutes,
+                        SUM(CASE WHEN r.is_late=TRUE THEN 1 ELSE 0 END) AS late_count,
+                        SUM(CASE WHEN r.time_in IS NOT NULL AND r.time_out IS NULL AND r.date < %s THEN 1 ELSE 0 END) AS missing_count
+                    FROM users u
+                    LEFT JOIN dtr_records r ON r.user_id = u.id
+                    WHERE {where_sql}
+                    GROUP BY u.id
+                    ORDER BY u.course, u.section, u.full_name
+                    LIMIT 300
+                """, tuple([datetime.now(PH_TZ).date()] + params))
+                rows = cur.fetchall()
+
+                log_admin_action(cur, admin_id, "PORTAL_STUDENTS_VIEW", target=f"{course} {section}".strip(), metadata={"q": q})
+
+        # compute remaining hours for display
+        for r in rows:
+            req = int(r.get("required_hours") or 240)
+            acc_h = (int(r.get("total_minutes") or 0)) / 60.0
+            r["acc_hours"] = round(acc_h, 2)
+            r["remaining_hours"] = round(max(0.0, req - acc_h), 2)
+
+        return render_template(
+            "admin/students.html",
+            students=rows,
+            course=course,
+            section=section,
+            q=q,
+            admin_name=session.get("admin_name","Admin")
+        )
+    finally:
+        conn.close()
+
+
+# =========================================================
+# Student Detail
+# =========================================================
+
+@app.route("/admin/student/<int:user_id>")
+@admin_required
+def admin_student_detail(user_id: int):
+    admin_id = session["admin_user_id"]
+    today_ph = datetime.now(PH_TZ).date()
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT id, full_name, student_id, course, section, company_name,
+                           required_hours, start_date, end_date,
+                           completion_status, completed_at
+                    FROM users
+                    WHERE id = %s AND COALESCE(role,'student')='student'
+                """, (user_id,))
+                u = cur.fetchone()
+                if not u:
+                    abort(404)
+
+                cur.execute("""
+                    SELECT date, time_in, time_out, minutes_worked, is_late, late_minutes
+                    FROM dtr_records
+                    WHERE user_id = %s
+                    ORDER BY date DESC
+                    LIMIT 30
+                """, (user_id,))
+                recent = cur.fetchall()
+
+                cur.execute("""
+                    SELECT COALESCE(SUM(COALESCE(minutes_worked,0)),0) AS total_minutes
+                    FROM dtr_records WHERE user_id = %s
+                """, (user_id,))
+                total_minutes = int(cur.fetchone()["total_minutes"] or 0)
+
+                log_admin_action(cur, admin_id, "PORTAL_STUDENT_VIEW", target=u.get("student_id") or str(user_id))
+
+        req = int(u.get("required_hours") or 240)
+        acc_h = total_minutes / 60.0
+        remaining_h = max(0.0, req - acc_h)
+
+        return render_template(
+            "admin/student_detail.html",
+            u=u,
+            recent=recent,
+            acc_hours=round(acc_h, 2),
+            remaining_hours=round(remaining_h, 2),
+            today=today_ph,
+            admin_name=session.get("admin_name","Admin")
+        )
+    finally:
+        conn.close()
+
+
+
+# =========================================================
+# Export Page
+# =========================================================
+
+@app.route("/admin/exports", methods=["GET", "POST"])
+@admin_required
+def admin_exports():
+    admin_id = session["admin_user_id"]
+    link = None
+    error = None
+
+    if request.method == "POST":
+        course = (request.form.get("course") or "").strip().upper()
+        section = (request.form.get("section") or "").strip().upper()
+
+        if not course or not section:
+            error = "Course and Section are required."
+        else:
+            payload = {"course": course, "section": section, "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS}
+            token = make_export_token(payload)
+            link = f"https://{request.host}/export/class?token={token}"
+
+            conn = get_db_connection()
+            try:
+                with conn:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                        log_admin_action(cur, admin_id, "PORTAL_EXPORT_CLASS", target=f"{course} {section}")
+            finally:
+                conn.close()
+
+    return render_template("admin/exports.html", link=link, error=error, admin_name=session.get("admin_name","Admin"))
+
+
+# =========================================================
+# Log page
+# =========================================================
+
+@app.route("/admin/logs")
+@admin_required
+def admin_logs():
+    admin_id = session["admin_user_id"]
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT l.created_at, l.action, l.target, u.full_name
+                    FROM admin_activity_logs l
+                    JOIN users u ON u.id = l.admin_user_id
+                    ORDER BY l.created_at DESC
+                    LIMIT 50
+                """)
+                rows = cur.fetchall()
+                log_admin_action(cur, admin_id, "PORTAL_LOGS_VIEW")
+        return render_template("admin/logs.html", rows=rows, admin_name=session.get("admin_name","Admin"))
+    finally:
+        conn.close()
+
+
 
 # =========================================================
 # ADMIN handlers
@@ -1502,3 +1853,4 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
