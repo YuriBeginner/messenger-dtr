@@ -948,6 +948,11 @@ def cron_risk_snapshot():
     finally:
         conn.close()
 
+@app.route("/health")
+def health():
+    return {"ok": True, "service": "ojt-management-portal"}, 200
+
+
 
 # =========================================================
 # Core handlers
@@ -1866,5 +1871,6 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
