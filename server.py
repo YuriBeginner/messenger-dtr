@@ -538,112 +538,105 @@ def webhook():
                             send_message(sender_id, "⛔ Admin access required.")
                             return "ok", 200
 
-                        cmd = " ".join(text.split())
+                        cmd = " ".join(text.split())  # normalize spaces
+                        parts = cmd.split()
 
+                        # ADMIN HELP
+                        if cmd == "ADMIN HELP":
+                            send_message(sender_id, admin_help_text())
+                            return "ok", 200
+
+                        # ADMIN SUMMARY
                         if cmd == "ADMIN SUMMARY":
-                            msg = handle_admin_summary(cur, today_ph)
-                            send_message(sender_id, msg)
+                            send_message(sender_id, handle_admin_summary(cur, today_ph))
                             return "ok", 200
 
-                        if cmd.startswith("ADMIN RISK "):
-                            parts = cmd.split()
-                            # ADMIN RISK <COURSE> <SECTION>
-                            if len(parts) != 4:
-                                send_message(sender_id, "Usage: ADMIN RISK <course> <section>\nExample: ADMIN RISK BSECE 4B")
-                                return "ok", 200
-
-                            course = parts[2].upper()
-                            section = parts[3].upper()
-                            msg = handle_admin_risk(cur, today_ph, course, section)
-                            send_message(sender_id, msg)
-                            return "ok", 200
-
+                        # ADMIN MISSING TODAY [course] [section]
                         if cmd.startswith("ADMIN MISSING TODAY"):
-                            parts = cmd.split()
-
-                            course = None
-                            section = None
-
-                            if len(parts) == 4:
+                            # allowed:
+                            # parts = ["ADMIN","MISSING","TODAY"]
+                            # parts = ["ADMIN","MISSING","TODAY","BSECE"]
+                            # parts = ["ADMIN","MISSING","TODAY","BSECE","4B"]
+                            if len(parts) == 3:
+                                course = None
+                                section = None
+                            elif len(parts) == 4:
                                 course = parts[3].upper()
+                                section = None
                             elif len(parts) == 5:
                                 course = parts[3].upper()
                                 section = parts[4].upper()
-                            elif len(parts) != 3:
-                                send_message(
-                                    sender_id,
-                                    "Usage:\n"
-                                    "• ADMIN MISSING TODAY\n"
-                                    "• ADMIN MISSING TODAY <course>\n"
-                                    "• ADMIN MISSING TODAY <course> <section>\n"
-                                    "Example: ADMIN MISSING TODAY BSECE 4B"
-                                )
+                            else:
+                                send_message(sender_id, usage(
+                                    "ADMIN MISSING TODAY",
+                                    "ADMIN MISSING TODAY [course] [section]",
+                                    "ADMIN MISSING TODAY BSECE 4B"
+                                ))
                                 return "ok", 200
 
-                            msg = handle_admin_missing_today(cur, today_ph, course=course, section=section)
-                            send_message(sender_id, msg)
+                            send_message(sender_id, handle_admin_missing_today(cur, today_ph, course=course, section=section))
                             return "ok", 200
 
-                        if cmd.startswith("ADMIN EXPORT CLASS "):
-                            parts = cmd.split()
+                        # ADMIN RISK <course> <section>
+                        if cmd.startswith("ADMIN RISK"):
+                            if len(parts) != 4:
+                                send_message(sender_id, usage("ADMIN RISK", "ADMIN RISK <course> <section>", "ADMIN RISK BSECE 4B"))
+                                return "ok", 200
+                            course = parts[2].upper()
+                            section = parts[3].upper()
+                            send_message(sender_id, handle_admin_risk(cur, today_ph, course, section))
+                            return "ok", 200
+
+                        # ADMIN STUDENT <student_id>
+                        if cmd.startswith("ADMIN STUDENT"):
+                            if len(parts) != 3:
+                                send_message(sender_id, usage("ADMIN STUDENT", "ADMIN STUDENT <student_id>", "ADMIN STUDENT 2020-12345"))
+                                return "ok", 200
+                            student_id_input = parts[2].strip()
+                            send_message(sender_id, handle_admin_student(cur, today_ph, student_id_input))
+                            return "ok", 200
+
+                        # ADMIN CLASS <course> <section>
+                        if cmd.startswith("ADMIN CLASS"):
+                            if len(parts) != 4:
+                                send_message(sender_id, usage("ADMIN CLASS", "ADMIN CLASS <course> <section>", "ADMIN CLASS BSECE 4B"))
+                                return "ok", 200
+                            course = parts[2].upper()
+                            section = parts[3].upper()
+                            send_message(sender_id, handle_admin_class(cur, today_ph, course, section))
+                            return "ok", 200
+
+                        # ADMIN SECTION <section>
+                        if cmd.startswith("ADMIN SECTION"):
+                            if len(parts) != 3:
+                                send_message(sender_id, usage("ADMIN SECTION", "ADMIN SECTION <section>", "ADMIN SECTION 4B"))
+                                return "ok", 200
+                            section = parts[2].upper()
+                            send_message(sender_id, handle_admin_section(cur, today_ph, section))
+                            return "ok", 200
+
+                        # ADMIN EXPORT CLASS <course> <section>
+                        if cmd.startswith("ADMIN EXPORT CLASS"):
                             if len(parts) != 5:
-                                send_message(sender_id, "Usage: ADMIN EXPORT CLASS <course> <section>\nExample: ADMIN EXPORT CLASS BSECE 4B")
+                                send_message(sender_id, usage(
+                                    "ADMIN EXPORT CLASS",
+                                    "ADMIN EXPORT CLASS <course> <section>",
+                                    "ADMIN EXPORT CLASS BSECE 4B"
+                                ))
                                 return "ok", 200
 
                             course = parts[3].upper()
                             section = parts[4].upper()
-
                             payload = {"course": course, "section": section, "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS}
                             token = make_export_token(payload)
                             link = f"https://{request.host}/export/class?token={token}"
-
                             send_message(sender_id, f"📄 Export ready (valid for 5 minutes):\n{link}")
                             return "ok", 200
 
-                        if cmd.startswith("ADMIN SECTION "):
-                            section = cmd[len("ADMIN SECTION "):].strip()
-                            if not section:
-                                send_message(sender_id, "Usage: ADMIN SECTION <section>")
-                                return "ok", 200
-
-                            msg = handle_admin_section(cur, today_ph, section)
-                            send_message(sender_id, msg)
-                            return "ok", 200
-
-                        if cmd.startswith("ADMIN CLASS "):
-                            parts = cmd.split()
-                            if len(parts) != 4:
-                                send_message(sender_id, "Usage: ADMIN CLASS <course> <section>\nExample: ADMIN CLASS BSECE 4B")
-                                return "ok", 200
-
-                            course = parts[2].strip().upper()
-                            section = parts[3].strip().upper()
-
-                            msg = handle_admin_class(cur, today_ph, course, section)
-                            send_message(sender_id, msg)
-                            return "ok", 200
-
-                        if cmd.startswith("ADMIN STUDENT "):
-                            student_id_input = cmd[len("ADMIN STUDENT "):].strip()
-                            if not student_id_input:
-                                send_message(sender_id, "Usage: ADMIN STUDENT <student_id>")
-                                return "ok", 200
-
-                            msg = handle_admin_student(cur, today_ph, student_id_input)
-                            send_message(sender_id, msg)
-                            return "ok", 200
-
-                        send_message(
-                            sender_id,
-                            "Admin commands:\n"
-                            "• ADMIN SUMMARY\n"
-                            "• ADMIN RISK <course> <section>\n"
-                            "• ADMIN MISSING TODAY [course] [section]\n"
-                            "• ADMIN STUDENT <student_id>\n"
-                            "• ADMIN CLASS <course> <section>\n"
-                            "• ADMIN EXPORT CLASS <course> <section>"
-                        )
+                        # Unknown admin command (clean)
+                        send_message(sender_id, "Unknown admin command. Type: ADMIN HELP")
                         return "ok", 200
+
 
                     # ==========================
                     # STUDENT COMMANDS
@@ -1473,6 +1466,30 @@ def handle_admin_class(cur, today_ph: date, course: str, section: str) -> str:
 
     return "\n".join(lines)
 
+def usage(cmd_name: str, usage_line: str, example_line: str) -> str:
+    return f"Usage: {usage_line}\nExample: {example_line}"
+
+def admin_help_text() -> str:
+    return (
+        "🧑‍💼 Admin Commands\n\n"
+        "Dashboards:\n"
+        "• ADMIN SUMMARY\n"
+        "• ADMIN CLASS <course> <section>\n"
+        "• ADMIN SECTION <section>\n"
+        "• ADMIN RISK <course> <section>\n\n"
+        "Compliance:\n"
+        "• ADMIN MISSING TODAY\n"
+        "• ADMIN MISSING TODAY <course>\n"
+        "• ADMIN MISSING TODAY <course> <section>\n\n"
+        "Exports:\n"
+        "• ADMIN EXPORT CLASS <course> <section>\n\n"
+        "Student lookup:\n"
+        "• ADMIN STUDENT <student_id>\n\n"
+        "Examples:\n"
+        "• ADMIN CLASS BSECE 4B\n"
+        "• ADMIN MISSING TODAY BSECE 4B\n"
+        "• ADMIN RISK BSECE 4B"
+    )
 
 # =========================================================
 # Home
