@@ -1279,16 +1279,18 @@ def admin_dashboard():
                 # Top 5 HIGH risk today (from snapshot)
                 cur.execute("""
                     SELECT u.id, u.full_name, u.student_id, u.course, u.section,
-                           rs.accumulated_hours, rs.expected_hours
+                           COALESCE(rs.accumulated_hours, 0) AS accumulated_hours,
+                           COALESCE(rs.expected_hours, 0) AS expected_hours
                     FROM risk_snapshots rs
                     JOIN users u ON u.id = rs.user_id
                     WHERE rs.snapshot_date = %s
                       AND rs.risk_level = 'HIGH'
                       AND COALESCE(u.role,'student')='student'
-                    ORDER BY (rs.expected_hours - rs.accumulated_hours) DESC
+                    ORDER BY (COALESCE(rs.expected_hours,0) - COALESCE(rs.accumulated_hours,0)) DESC
                     LIMIT 5
                 """, (today_ph,))
                 top_high_risk = cur.fetchall()
+
 
                 # Missing TIME OUT today (cap 8 for readability)
                 cur.execute("""
@@ -1925,6 +1927,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
