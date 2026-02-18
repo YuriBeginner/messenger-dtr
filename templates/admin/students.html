@@ -1,40 +1,26 @@
 {% extends "admin/base.html" %}
 {% block content %}
 
-<!-- Filter Card -->
 <div class="card-soft p-3 mb-3">
-  <form class="row g-2 align-items-center" method="get">
+  <form class="row g-2" method="get">
     <div class="col-md-3">
-      <input class="form-control form-control-sm"
-             name="course"
-             placeholder="Course (e.g. BSECE)"
-             value="{{ course }}">
+      <input class="form-control" name="course" placeholder="Course (e.g. BSECE)" value="{{ course }}">
     </div>
-
     <div class="col-md-2">
-      <input class="form-control form-control-sm"
-             name="section"
-             placeholder="Section (e.g. 4B)"
-             value="{{ section }}">
+      <input class="form-control" name="section" placeholder="Section (e.g. 4B)" value="{{ section }}">
     </div>
-
     <div class="col-md-5">
-      <input class="form-control form-control-sm"
-             name="q"
-             placeholder="Search name or student_id"
-             value="{{ q }}">
+      <input class="form-control" name="q" placeholder="Search name or student_id" value="{{ q }}">
     </div>
-
     <div class="col-md-2 d-grid">
-      <button class="btn btn-dark btn-sm">Filter</button>
+      <button class="btn btn-dark">Filter</button>
     </div>
   </form>
 </div>
 
-<!-- Students Table -->
 <div class="card-soft">
   <div class="table-responsive">
-    <table class="table table-sm table-hover mb-0 align-middle">
+    <table class="table table-sm table-hover mb-0">
       <thead>
         <tr>
           <th>Name</th>
@@ -45,82 +31,35 @@
           <th class="text-end">Remain (h)</th>
           <th class="text-end">Late</th>
           <th class="text-end">Missing</th>
-          <th>Risk</th>
           <th>Status</th>
         </tr>
       </thead>
-
       <tbody>
-        {% for s in students %}
+      {% for s in students %}
         <tr>
-          <!-- Name -->
-          <td>
-            <a href="/admin/student/{{ s.id }}"
-               class="fw-semibold text-decoration-none"
-               style="color:#111827;">
-              {{ s.full_name }}
-            </a>
-          </td>
-
-          <!-- Student ID -->
-          <td class="text-muted">
-            {{ s.student_id }}
-          </td>
-
-          <!-- Course -->
+          <td><a class="fw-semibold" href="/admin/student/{{ s.id }}">{{ s.full_name }}</a></td>
+          <td class="text-muted">{{ s.student_id }}</td>
           <td>{{ s.course }}</td>
-
-          <!-- Section -->
           <td>{{ s.section }}</td>
+          <td class="text-end">{{ s.acc_hours }}</td>
+          <td class="text-end">{{ s.remaining_hours }}</td>
 
-          <!-- Accumulated -->
-          <td class="text-end">
-            {{ "%.2f"|format(s.acc_hours) }}
-          </td>
-
-          <!-- Remaining -->
-          <td class="text-end">
-            {{ "%.2f"|format(s.remaining_hours) }}
-          </td>
-
-          <!-- Late -->
           <td class="text-end">
             {% if (s.late_count or 0) > 0 %}
-              <span class="badge-soft b-yellow">
-                {{ s.late_count }}
-              </span>
+              <span class="badge-soft b-yellow">{{ s.late_count }}</span>
             {% else %}
               <span class="text-muted">0</span>
             {% endif %}
           </td>
 
-          <!-- Missing -->
           <td class="text-end">
             {% if (s.missing_count or 0) > 0 %}
-              <span class="badge-soft b-red">
-                {{ s.missing_count }}
-              </span>
+              <span class="badge-soft b-red">{{ s.missing_count }}</span>
             {% else %}
               <span class="text-muted">0</span>
             {% endif %}
           </td>
 
-          <!-- Risk -->
-          <td>
-            {% if s.risk_level == 'HIGH' %}
-              <span class="badge-soft b-red">HIGH</span>
-            {% elif s.risk_level == 'MED' %}
-              <span class="badge-soft b-yellow">MED</span>
-            {% elif s.risk_level == 'LOW' %}
-              <span class="badge-soft b-green">LOW</span>
-            {% elif s.risk_level == 'COMPLETE' %}
-              <span class="badge-soft b-green">COMPLETE</span>
-            {% else %}
-              <span class="badge-soft b-gray">—</span>
-            {% endif %}
-          </td>
-
-          <!-- Completion Status -->
           <td>
             {% if s.completion_status == 'COMPLETE' %}
               <span class="badge-soft b-green">COMPLETE</span>
@@ -129,7 +68,7 @@
             {% endif %}
           </td>
         </tr>
-        {% endfor %}
+      {% endfor %}
       </tbody>
     </table>
   </div>
