@@ -1278,8 +1278,7 @@ def admin_dashboard():
 
 
 
-                today_ph = datetime.now(PH_TZ).date()
-
+    today_ph = datetime.now(PH_TZ).date()
                 # Top 5 HIGH risk today (from snapshot)
     cur.execute("""
         SELECT u.id, u.full_name, u.student_id, u.course, u.section,
@@ -1929,6 +1928,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
