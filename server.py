@@ -1276,6 +1276,50 @@ def admin_dashboard():
 
         last_updated = datetime.now(PH_TZ).strftime("%I:%M %p")
 
+
+
+                today_ph = datetime.now(PH_TZ).date()
+
+                # Top 5 HIGH risk today (from snapshot)
+    cur.execute("""
+        SELECT u.id, u.full_name, u.student_id, u.course, u.section,
+               rs.accumulated_hours, rs.expected_hours
+        FROM risk_snapshots rs
+        JOIN users u ON u.id = rs.user_id
+        WHERE rs.snapshot_date = %s
+          AND rs.risk_level = 'HIGH'
+          AND COALESCE(u.role,'student')='student'
+        ORDER BY (rs.expected_hours - rs.accumulated_hours) DESC
+        LIMIT 5
+    """, (today_ph,))
+    top_high_risk = cur.fetchall()
+
+    # Missing TIME OUT today (cap 8 for readability)
+    cur.execute("""
+        SELECT u.id, u.full_name, u.student_id, u.course, u.section
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND r.time_out IS NULL
+          AND COALESCE(u.role,'student')='student'
+        ORDER BY u.course, u.section, u.full_name
+        LIMIT 8
+    """, (today_ph,))
+    missing_today_list = cur.fetchall()
+
+    # Recently completed (latest 5)
+    cur.execute("""
+        SELECT u.id, u.full_name, u.student_id, u.course, u.section, u.completed_at
+        FROM users u
+        WHERE COALESCE(u.role,'student')='student'
+          AND u.completion_status = 'COMPLETE'
+          AND u.completed_at IS NOT NULL
+        ORDER BY u.completed_at DESC
+        LIMIT 5
+    """)
+    recent_completed = cur.fetchall()
+        
         return render_template(
             "admin/dashboard.html",
             page_title="Dashboard",
@@ -1290,6 +1334,10 @@ def admin_dashboard():
             completed=completed,
             high_risk=high_risk,
             med_risk=med_risk,
+
+            top_high_risk=top_high_risk,
+            missing_today_list=missing_today_list,
+            recent_completed=recent_completed,
 
             admin_name=session.get("admin_name", "Admin")
         )
@@ -1881,6 +1929,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
