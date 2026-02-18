@@ -1358,6 +1358,10 @@ def admin_students():
             r["acc_hours"] = round(acc_h, 2)
             r["remaining_hours"] = round(max(0.0, req - acc_h), 2)
 
+            if r.get("completion_status") == "COMPLETE":
+                r["risk_level"] = "COMPLETE"
+
+
         return render_template(
             "admin/students.html",
             page_title="Students",
@@ -1877,6 +1881,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
