@@ -31,6 +31,7 @@
           <th class="text-end">Remain (h)</th>
           <th class="text-end">Late</th>
           <th class="text-end">Missing</th>
+          <th>Risk</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -60,6 +61,20 @@
             {% endif %}
           </td>
 
+          <td>
+            {% if s.risk_level == 'HIGH' %}
+              <span class="badge-soft b-red">HIGH</span>
+            {% elif s.risk_level == 'MED' %}
+              <span class="badge-soft b-yellow">MED</span>
+            {% elif s.risk_level == 'LOW' %}
+              <span class="badge-soft b-green">LOW</span>
+            {% elif s.risk_level == 'COMPLETE' %}
+              <span class="badge-soft b-green">COMPLETE</span>
+            {% else %}
+              <span class="badge-soft b-gray">—</span>
+            {% endif %}
+          </td>
+          
           <td>
             {% if s.completion_status == 'COMPLETE' %}
               <span class="badge-soft b-green">COMPLETE</span>
