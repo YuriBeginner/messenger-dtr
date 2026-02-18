@@ -1,0 +1,17 @@
+{% extends "admin/base.html" %}
+{% block content %}
+<h3 class="mb-3">Dashboard <span class="text-muted fs-6">({{ today }})</span></h3>
+
+<div class="row g-3">
+  <div class="col-md-3"><div class="card p-3 shadow-sm"><div class="text-muted">Students</div><div class="fs-3">{{ total_students }}</div></div></div>
+  <div class="col-md-3"><div class="card p-3 shadow-sm"><div class="text-muted">Timed In Today</div><div class="fs-3">{{ timed_in_today }}</div></div></div>
+  <div class="col-md-3"><div class="card p-3 shadow-sm"><div class="text-muted">Missing Time-out</div><div class="fs-3">{{ missing_timeout_today }}</div></div></div>
+  <div class="col-md-3"><div class="card p-3 shadow-sm"><div class="text-muted">Late Today</div><div class="fs-3">{{ late_today }}</div></div></div>
+</div>
+
+<div class="row g-3 mt-1">
+  <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="text-muted">Completed</div><div class="fs-3">{{ completed }}</div></div></div>
+  <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="text-muted">High Risk</div><div class="fs-3">{{ high_risk }}</div></div></div>
+  <div class="col-md-4"><div class="card p-3 shadow-sm"><div class="text-muted">Med Risk</div><div class="fs-3">{{ med_risk }}</div></div></div>
+</div>
+{% endblock %}
