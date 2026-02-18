@@ -1327,20 +1327,26 @@ def admin_students():
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                today_ph = datetime.now(PH_TZ).date()
+
                 cur.execute(f"""
                     SELECT
                         u.id, u.full_name, u.student_id, u.course, u.section,
                         u.required_hours, u.completion_status,
                         COALESCE(SUM(COALESCE(r.minutes_worked,0)),0) AS total_minutes,
                         SUM(CASE WHEN r.is_late=TRUE THEN 1 ELSE 0 END) AS late_count,
-                        SUM(CASE WHEN r.time_in IS NOT NULL AND r.time_out IS NULL AND r.date < %s THEN 1 ELSE 0 END) AS missing_count
+                        SUM(CASE WHEN r.time_in IS NOT NULL AND r.time_out IS NULL AND r.date < %s THEN 1 ELSE 0 END) AS missing_count,
+                        COALESCE(rs.risk_level, '—') AS risk_level
                     FROM users u
                     LEFT JOIN dtr_records r ON r.user_id = u.id
+                    LEFT JOIN risk_snapshots rs
+                      ON rs.user_id = u.id
+                     AND rs.snapshot_date = %s
                     WHERE {where_sql}
-                    GROUP BY u.id
+                    GROUP BY u.id, rs.risk_level
                     ORDER BY u.course, u.section, u.full_name
                     LIMIT 300
-                """, tuple([datetime.now(PH_TZ).date()] + params))
+                """, tuple([today_ph, today_ph] + params))
                 rows = cur.fetchall()
 
                 log_admin_action(cur, admin_id, "PORTAL_STUDENTS_VIEW", target=f"{course} {section}".strip(), metadata={"q": q})
@@ -1871,6 +1877,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
