@@ -1,6 +1,90 @@
 {% extends "admin/base.html" %}
 {% block content %}
 <!-- “Live” feel: refresh every 60 seconds (calm, not spammy) -->
+<div class="row g-3 mt-2">
+  <!-- Top 5 High Risk -->
+  <div class="col-lg-4">
+    <div class="card-soft p-3">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-bold">Top 5 High Risk</div>
+        <span class="badge-soft b-red">HIGH</span>
+      </div>
+
+      {% if top_high_risk and top_high_risk|length > 0 %}
+        <div class="d-grid gap-2">
+          {% for s in top_high_risk %}
+            <a class="text-decoration-none" href="/admin/student/{{ s.id }}" style="color:#111827;">
+              <div class="d-flex justify-content-between">
+                <div class="fw-semibold">{{ s.full_name }}</div>
+                <div class="text-muted">{{ s.course }} {{ s.section }}</div>
+              </div>
+              <div class="subtle">
+                {{ s.student_id }} • {{ "%.1f"|format(s.accumulated_hours or 0) }}h / exp {{ "%.1f"|format(s.expected_hours or 0) }}h
+              </div>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="subtle">No students flagged as HIGH risk today.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Missing Time-out Today -->
+  <div class="col-lg-4">
+    <div class="card-soft p-3">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-bold">Missing TIME OUT</div>
+        <span class="badge-soft b-yellow">TODAY</span>
+      </div>
+
+      {% if missing_today_list and missing_today_list|length > 0 %}
+        <div class="d-grid gap-2">
+          {% for s in missing_today_list %}
+            <a class="text-decoration-none" href="/admin/student/{{ s.id }}" style="color:#111827;">
+              <div class="d-flex justify-content-between">
+                <div class="fw-semibold">{{ s.full_name }}</div>
+                <div class="text-muted">{{ s.course }} {{ s.section }}</div>
+              </div>
+              <div class="subtle">{{ s.student_id }}</div>
+            </a>
+          {% endfor %}
+        </div>
+        <div class="mt-2 subtle">Tip: Use Messenger reminder or export missing list.</div>
+      {% else %}
+        <div class="subtle">No missing TIME OUT records right now.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Recently Completed -->
+  <div class="col-lg-4">
+    <div class="card-soft p-3">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <div class="fw-bold">Recently Completed</div>
+        <span class="badge-soft b-green">COMPLETE</span>
+      </div>
+
+      {% if recent_completed and recent_completed|length > 0 %}
+        <div class="d-grid gap-2">
+          {% for s in recent_completed %}
+            <a class="text-decoration-none" href="/admin/student/{{ s.id }}" style="color:#111827;">
+              <div class="d-flex justify-content-between">
+                <div class="fw-semibold">{{ s.full_name }}</div>
+                <div class="text-muted">{{ s.course }} {{ s.section }}</div>
+              </div>
+              <div class="subtle">{{ s.student_id }}</div>
+            </a>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="subtle">No recent completions yet.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+
 <meta http-equiv="refresh" content="60">
 
 <div class="row g-3">
