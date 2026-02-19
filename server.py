@@ -1669,13 +1669,10 @@ def admin_logs():
 
                 log_admin_action(cur, admin_id, "PORTAL_LOGS_VIEW")
 
-        return render_template(
-            "admin/logs.html",
-            rows=rows,
-            admin_name=session.get("admin_name","Admin")
-        )
+        return render_template("admin/logs.html", rows=rows, admin_name=session.get("admin_name","Admin"))
     finally:
         conn.close()
+
 
 # =========================================================
 # ADMIN handlers
@@ -2066,6 +2063,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
