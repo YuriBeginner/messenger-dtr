@@ -71,8 +71,31 @@
       font-weight: 600;
       font-size: 0.9rem;
     }
-    .nav-pill:hover { background:#f3f4f6; border-color:#eef0f3; }
-    .nav-pill.active { background: var(--brand-primary); color:#fff; }
+    .nav-pill:hover {
+      background:#f3f4f6;
+      border-color:#eef0f3;
+      color:#111827 !important;
+    }
+    
+    .nav-pill.active {
+      background:#111827;
+      border-color:#111827;
+      color:#ffffff !important;
+    }
+    .nav-pill,
+    .nav-pill:visited,
+    .nav-pill:active,
+    .nav-pill:focus {
+      color:#111827;
+    }
+    
+    .nav-pill.active,
+    .nav-pill.active:visited,
+    .nav-pill.active:active,
+    .nav-pill.active:focus {
+      color:#ffffff !important;
+    }
+  
     .nav-section { margin-top: 10px; }
 
     /* Content */
