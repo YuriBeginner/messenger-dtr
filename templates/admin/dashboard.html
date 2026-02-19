@@ -163,6 +163,28 @@
   </div>
 </div>
 
+<div class="card-soft p-3">
+  <div class="d-flex align-items-center justify-content-between mb-2">
+    <div>
+      <div class="fw-semibold">Risk Distribution</div>
+      <div class="subtle">Today’s snapshot</div>
+    </div>
+    <span class="badge-soft b-gray">LIVE</span>
+  </div>
+
+  <div style="height: 220px;">
+    <canvas id="riskDonut"></canvas>
+  </div>
+
+  <div class="d-flex gap-2 mt-3 flex-wrap">
+    <span class="badge-soft b-red">HIGH: {{ high_risk }}</span>
+    <span class="badge-soft b-yellow">MED: {{ med_risk }}</span>
+    <span class="badge-soft b-green">LOW: {{ low_risk }}</span>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
 <div class="mt-4">
   <div class="card-soft p-3">
     <div class="d-flex align-items-center justify-content-between">
