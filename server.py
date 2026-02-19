@@ -1145,8 +1145,11 @@ def admin_dashboard():
     admin_id = session["admin_user_id"]
     org_id = session.get("org_id")
 
-    with conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+
 
             # ✅ totals (org scoped)
             cur.execute("""
@@ -1285,7 +1288,7 @@ def admin_dashboard():
             admin_name=session.get("admin_name", "Admin")
         )
     
-    finally:
+     finally:
         conn.close()
 
 # =========================================================
@@ -2020,6 +2023,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
