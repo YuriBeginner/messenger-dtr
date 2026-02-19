@@ -1235,6 +1235,7 @@ def admin_dashboard():
                     SELECT COUNT(DISTINCT user_id) AS c
                     FROM dtr_records
                     WHERE date = %s AND time_in IS NOT NULL
+                      AND organization_id = %s
                 """, (today_ph,))
                 timed_in_today = int(cur.fetchone()["c"])
 
@@ -1242,6 +1243,7 @@ def admin_dashboard():
                     SELECT COUNT(*) AS c
                     FROM dtr_records
                     WHERE date = %s AND time_in IS NOT NULL AND time_out IS NULL
+                      AND organization_id = %s
                 """, (today_ph,))
                 missing_timeout_today = int(cur.fetchone()["c"])
 
@@ -1249,6 +1251,7 @@ def admin_dashboard():
                     SELECT COUNT(*) AS c
                     FROM dtr_records
                     WHERE date = %s AND is_late = TRUE
+                      AND organization_id = %s
                 """, (today_ph,))
                 late_today = int(cur.fetchone()["c"])
 
@@ -1256,6 +1259,7 @@ def admin_dashboard():
                     SELECT COUNT(*) AS c
                     FROM users
                     WHERE COALESCE(role,'student')='student'
+                      AND organization_id = %s
                       AND completion_status = 'COMPLETE'
                 """)
                 completed = int(cur.fetchone()["c"])
@@ -1267,6 +1271,7 @@ def admin_dashboard():
                         SUM(CASE WHEN risk_level='MED' THEN 1 ELSE 0 END)  AS med
                     FROM risk_snapshots
                     WHERE snapshot_date = %s
+                      AND organization_id = %s
                 """, (today_ph,))
                 rs = cur.fetchone() or {}
                 high_risk = int(rs.get("high") or 0)
@@ -1284,6 +1289,7 @@ def admin_dashboard():
                     FROM risk_snapshots rs
                     JOIN users u ON u.id = rs.user_id
                     WHERE rs.snapshot_date = %s
+                      AND organization_id = %s
                       AND rs.risk_level = 'HIGH'
                       AND COALESCE(u.role,'student')='student'
                     ORDER BY (COALESCE(rs.expected_hours,0) - COALESCE(rs.accumulated_hours,0)) DESC
@@ -1298,6 +1304,7 @@ def admin_dashboard():
                     FROM dtr_records r
                     JOIN users u ON u.id = r.user_id
                     WHERE r.date = %s
+                      AND organization_id = %s
                       AND r.time_in IS NOT NULL
                       AND r.time_out IS NULL
                       AND COALESCE(u.role,'student')='student'
@@ -1311,6 +1318,7 @@ def admin_dashboard():
                     SELECT u.id, u.full_name, u.student_id, u.course, u.section, u.completed_at
                     FROM users u
                     WHERE COALESCE(u.role,'student')='student'
+                    AND organization_id = %s
                     AND u.completion_status = 'COMPLETE'
                     AND u.completed_at IS NOT NULL
                     ORDER BY u.completed_at DESC
@@ -1389,6 +1397,7 @@ def admin_students():
                       ON rs.user_id = u.id
                      AND rs.snapshot_date = %s
                     WHERE {where_sql}
+                     AND organization_id = %s
                     GROUP BY u.id, rs.risk_level
                     ORDER BY u.course, u.section, u.full_name
                     LIMIT 300
@@ -1445,6 +1454,7 @@ def admin_student_detail(user_id: int):
                            completion_status, completed_at
                     FROM users
                     WHERE id = %s AND COALESCE(role,'student')='student'
+                      AND organization_id = %s
                 """, (user_id,))
                 u = cur.fetchone()
                 if not u:
@@ -1456,12 +1466,14 @@ def admin_student_detail(user_id: int):
                     WHERE user_id = %s
                     ORDER BY date DESC
                     LIMIT 30
+                      AND organization_id = %s
                 """, (user_id,))
                 recent = cur.fetchall()
 
                 cur.execute("""
                     SELECT COALESCE(SUM(COALESCE(minutes_worked,0)),0) AS total_minutes
                     FROM dtr_records WHERE user_id = %s
+                      AND organization_id = %s
                 """, (user_id,))
                 total_minutes = int(cur.fetchone()["total_minutes"] or 0)
 
@@ -1537,6 +1549,7 @@ def admin_logs():
                     JOIN users u ON u.id = l.admin_user_id
                     ORDER BY l.created_at DESC
                     LIMIT 50
+                      AND organization_id = %s
                 """)
                 rows = cur.fetchall()
                 log_admin_action(cur, admin_id, "PORTAL_LOGS_VIEW")
