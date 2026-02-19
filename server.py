@@ -662,12 +662,12 @@ def webhook():
                         # ADMIN EXPORT CLASS <course> <section>
                         # ADMIN EXPORT CLASS <course> <section>
                         if cmd.startswith("ADMIN EXPORT CLASS"):
-                        if len(parts) != 5:
-                            send_message(sender_id, usage(
-                                "ADMIN EXPORT CLASS",
-                                "ADMIN EXPORT CLASS <course> <section>",
-                                "ADMIN EXPORT CLASS BSECE 4B"
-                            ))
+                            if len(parts) != 5:
+                                send_message(sender_id, usage(
+                                    "ADMIN EXPORT CLASS",
+                                    "ADMIN EXPORT CLASS <course> <section>",
+                                    "ADMIN EXPORT CLASS BSECE 4B"
+                                ))
                             return "ok", 200
                     
                         course = parts[3].upper()
@@ -2063,6 +2063,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
