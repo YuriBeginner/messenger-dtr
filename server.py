@@ -10,6 +10,7 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from flask import Response
+from flask import abort
 from flask import Flask, request, render_template
 from datetime import datetime, timezone, timedelta, date
 from flask import session, redirect, url_for, abort
@@ -713,89 +714,6 @@ def webhook():
 # CSV Download Route
 # =========================================================
 
-@app.route("/export/class")
-def export_class_csv():
-    token = request.args.get("token", "")
-    payload = verify_export_token(token)
-    if not payload:
-        return "unauthorized", 401
-
-    course = payload["course"]
-    section = payload["section"]
-    today_ph = datetime.now(PH_TZ).date()
-
-    conn = get_db_connection()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT
-                        u.full_name,
-                        u.student_id,
-                        u.course,
-                        u.section,
-                        u.company_name,
-                        u.required_hours,
-                        u.start_date,
-                        u.end_date,
-                        u.completion_status,
-                        u.completed_at,
-                        COALESCE(SUM(COALESCE(r.minutes_worked,0)),0) AS total_minutes,
-                        SUM(CASE WHEN r.is_late = TRUE THEN 1 ELSE 0 END) AS late_count,
-                        SUM(CASE WHEN r.time_in IS NOT NULL AND r.time_out IS NULL AND r.date < %s THEN 1 ELSE 0 END) AS missing_timeout_count
-                    FROM users u
-                    LEFT JOIN dtr_records r ON r.user_id = u.id
-                    WHERE COALESCE(u.role,'student')='student'
-                      AND UPPER(u.course) = %s
-                      AND UPPER(u.section) = %s
-                    GROUP BY u.id
-                    ORDER BY u.full_name
-                """, (today_ph, course.upper(), section.upper()))
-                rows = cur.fetchall()
-
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow([
-            "Full Name","Student ID","Course","Section","Company",
-            "Required Hours","Start Date","End Date",
-            "Completion Status","Completed At (UTC)",
-            "Accumulated Hours","Remaining Hours",
-            "Late Count","Missing Time-outs (Past Days)"
-        ])
-
-        for r in rows:
-            required_hours = int(r["required_hours"] or 240)
-            total_minutes = int(r["total_minutes"] or 0)
-            acc_hours = total_minutes / 60.0
-            remaining = max(0.0, required_hours - acc_hours)
-
-            writer.writerow([
-                r.get("full_name",""),
-                r.get("student_id",""),
-                r.get("course",""),
-                r.get("section",""),
-                r.get("company_name",""),
-                required_hours,
-                r.get("start_date",""),
-                r.get("end_date",""),
-                r.get("completion_status","IN_PROGRESS"),
-                r.get("completed_at",""),
-                f"{acc_hours:.2f}",
-                f"{remaining:.2f}",
-                int(r.get("late_count") or 0),
-                int(r.get("missing_timeout_count") or 0),
-            ])
-
-        csv_data = output.getvalue()
-        filename = f"OJT_{course.upper()}_{section.upper()}_export.csv"
-
-        return Response(
-            csv_data,
-            mimetype="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
-        )
-    finally:
-        conn.close()
 
 
 # =========================================================
@@ -1176,7 +1094,7 @@ def admin_login():
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute("""
-                    SELECT id, full_name, role, password_hash
+                    SELECT id, full_name, role, password_hash, organization_id
                     FROM users
                     WHERE lower(email) = %s
                     LIMIT 1
@@ -1189,11 +1107,14 @@ def admin_login():
                 if not check_password_hash(u["password_hash"], password):
                     return render_template("admin/login.html", error="Invalid credentials.")
 
+                # ✅ store org in session
                 session["admin_user_id"] = u["id"]
                 session["admin_name"] = u.get("full_name") or "Admin"
+                session["org_id"] = u.get("organization_id")
 
                 log_admin_action(cur, u["id"], "PORTAL_LOGIN")
                 return redirect(url_for("admin_dashboard"))
+
     finally:
         conn.close()
 
@@ -1222,131 +1143,148 @@ def admin_logout():
 def admin_dashboard():
     today_ph = datetime.now(PH_TZ).date()
     admin_id = session["admin_user_id"]
+    org_id = session.get("org_id")
 
-    conn = get_db_connection()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # totals
-                cur.execute("SELECT COUNT(*) AS c FROM users WHERE COALESCE(role,'student')='student'")
-                total_students = int(cur.fetchone()["c"])
+    with conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
 
-                cur.execute("""
-                    SELECT COUNT(DISTINCT user_id) AS c
-                    FROM dtr_records
-                    WHERE date = %s AND time_in IS NOT NULL
-                      AND organization_id = %s
-                """, (today_ph,))
-                timed_in_today = int(cur.fetchone()["c"])
+            # ✅ totals (org scoped)
+            cur.execute("""
+                SELECT COUNT(*) AS c
+                FROM users
+                WHERE COALESCE(role,'student')='student'
+                  AND organization_id = %s
+            """, (org_id,))
+            total_students = int(cur.fetchone()["c"])
+    
+            # ✅ timed in today (org scoped via JOIN users)
+            cur.execute("""
+                SELECT COUNT(DISTINCT r.user_id) AS c
+                FROM dtr_records r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.date = %s
+                  AND r.time_in IS NOT NULL
+                  AND u.organization_id = %s
+            """, (today_ph, org_id))
+            timed_in_today = int(cur.fetchone()["c"])
 
-                cur.execute("""
-                    SELECT COUNT(*) AS c
-                    FROM dtr_records
-                    WHERE date = %s AND time_in IS NOT NULL AND time_out IS NULL
-                      AND organization_id = %s
-                """, (today_ph,))
-                missing_timeout_today = int(cur.fetchone()["c"])
+            # ✅ missing time-out today
+            cur.execute("""
+                SELECT COUNT(*) AS c
+                FROM dtr_records r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.date = %s
+                  AND r.time_in IS NOT NULL
+                  AND r.time_out IS NULL
+                  AND u.organization_id = %s
+            """, (today_ph, org_id))
+            missing_timeout_today = int(cur.fetchone()["c"])
+    
+            # ✅ late today
+            cur.execute("""
+                SELECT COUNT(*) AS c
+                FROM dtr_records r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.date = %s
+                  AND r.is_late = TRUE
+                  AND u.organization_id = %s
+            """, (today_ph, org_id))
+            late_today = int(cur.fetchone()["c"])
 
-                cur.execute("""
-                    SELECT COUNT(*) AS c
-                    FROM dtr_records
-                    WHERE date = %s AND is_late = TRUE
-                      AND organization_id = %s
-                """, (today_ph,))
-                late_today = int(cur.fetchone()["c"])
+            # ✅ completed count
+            cur.execute("""
+                SELECT COUNT(*) AS c
+                FROM users
+                WHERE COALESCE(role,'student')='student'
+                  AND organization_id = %s
+                  AND completion_status = 'COMPLETE'
+            """, (org_id,))
+            completed = int(cur.fetchone()["c"])
 
-                cur.execute("""
-                    SELECT COUNT(*) AS c
-                    FROM users
-                    WHERE COALESCE(role,'student')='student'
-                      AND organization_id = %s
-                      AND completion_status = 'COMPLETE'
-                """)
-                completed = int(cur.fetchone()["c"])
+            # ✅ risk snapshot counts (scoped)
+            cur.execute("""
+                SELECT
+                    SUM(CASE WHEN rs.risk_level='HIGH' THEN 1 ELSE 0 END) AS high,
+                    SUM(CASE WHEN rs.risk_level='MED'  THEN 1 ELSE 0 END) AS med
+                FROM risk_snapshots rs
+                JOIN users u ON u.id = rs.user_id
+                WHERE rs.snapshot_date = %s
+                  AND u.organization_id = %s
+            """, (today_ph, org_id))
+            rs = cur.fetchone() or {}
+            high_risk = int(rs.get("high") or 0)
+            med_risk = int(rs.get("med") or 0)
 
-                # risk snapshot counts (if cron ran)
-                cur.execute("""
-                    SELECT
-                        SUM(CASE WHEN risk_level='HIGH' THEN 1 ELSE 0 END) AS high,
-                        SUM(CASE WHEN risk_level='MED' THEN 1 ELSE 0 END)  AS med
-                    FROM risk_snapshots
-                    WHERE snapshot_date = %s
-                      AND organization_id = %s
-                """, (today_ph,))
-                rs = cur.fetchone() or {}
-                high_risk = int(rs.get("high") or 0)
-                med_risk = int(rs.get("med") or 0)
+            last_updated = datetime.now(PH_TZ).strftime("%I:%M %p")
 
-                log_admin_action(cur, admin_id, "PORTAL_DASHBOARD_VIEW", target=str(today_ph))
+            # ✅ Top 5 HIGH risk today
+            cur.execute("""
+                SELECT u.id, u.full_name, u.student_id, u.course, u.section,
+                       COALESCE(rs.accumulated_hours, 0) AS accumulated_hours,
+                       COALESCE(rs.expected_hours, 0) AS expected_hours
+                FROM risk_snapshots rs
+                JOIN users u ON u.id = rs.user_id
+                WHERE rs.snapshot_date = %s
+                  AND rs.risk_level = 'HIGH'
+                  AND COALESCE(u.role,'student')='student'
+                  AND u.organization_id = %s
+                ORDER BY (COALESCE(rs.expected_hours,0) - COALESCE(rs.accumulated_hours,0)) DESC
+                LIMIT 5
+            """, (today_ph, org_id))
+            top_high_risk = cur.fetchall()
 
-                last_updated = datetime.now(PH_TZ).strftime("%I:%M %p")
+            # ✅ Missing TIME OUT today list
+            cur.execute("""
+                SELECT u.id, u.full_name, u.student_id, u.course, u.section
+                FROM dtr_records r
+                JOIN users u ON u.id = r.user_id
+                WHERE r.date = %s
+                  AND r.time_in IS NOT NULL
+                  AND r.time_out IS NULL
+                  AND COALESCE(u.role,'student')='student'
+                  AND u.organization_id = %s
+                ORDER BY u.course, u.section, u.full_name
+                LIMIT 8
+            """, (today_ph, org_id))
+            missing_today_list = cur.fetchall()
 
-                # Top 5 HIGH risk today (from snapshot)
-                cur.execute("""
-                    SELECT u.id, u.full_name, u.student_id, u.course, u.section,
-                           COALESCE(rs.accumulated_hours, 0) AS accumulated_hours,
-                           COALESCE(rs.expected_hours, 0) AS expected_hours
-                    FROM risk_snapshots rs
-                    JOIN users u ON u.id = rs.user_id
-                    WHERE rs.snapshot_date = %s
-                      AND organization_id = %s
-                      AND rs.risk_level = 'HIGH'
-                      AND COALESCE(u.role,'student')='student'
-                    ORDER BY (COALESCE(rs.expected_hours,0) - COALESCE(rs.accumulated_hours,0)) DESC
-                    LIMIT 5
-                """, (today_ph,))
-                top_high_risk = cur.fetchall()
+            # ✅ Recently completed
+            cur.execute("""
+                SELECT u.id, u.full_name, u.student_id, u.course, u.section, u.completed_at
+                FROM users u
+                WHERE COALESCE(u.role,'student')='student'
+                  AND u.organization_id = %s
+                  AND u.completion_status = 'COMPLETE'
+                  AND u.completed_at IS NOT NULL
+                ORDER BY u.completed_at DESC
+                LIMIT 5
+            """, (org_id,))
+            recent_completed = cur.fetchall()
 
+            log_admin_action(cur, admin_id, "PORTAL_DASHBOARD_VIEW", target=str(today_ph))
 
-                # Missing TIME OUT today (cap 8 for readability)
-                cur.execute("""
-                    SELECT u.id, u.full_name, u.student_id, u.course, u.section
-                    FROM dtr_records r
-                    JOIN users u ON u.id = r.user_id
-                    WHERE r.date = %s
-                      AND organization_id = %s
-                      AND r.time_in IS NOT NULL
-                      AND r.time_out IS NULL
-                      AND COALESCE(u.role,'student')='student'
-                    ORDER BY u.course, u.section, u.full_name
-                    LIMIT 8
-                """, (today_ph,))
-                missing_today_list = cur.fetchall()
+    return render_template(
+        "admin/dashboard.html",
+        page_title="Dashboard",
+        subtitle=str(today_ph),
+        last_updated=last_updated,
+        active_page="dashboard",
+    
+        total_students=total_students,
+        timed_in_today=timed_in_today,
+        missing_timeout_today=missing_timeout_today,
+        late_today=late_today,
+        completed=completed,
+        high_risk=high_risk,
+        med_risk=med_risk,
 
-                # Recently completed (latest 5)
-                cur.execute("""
-                    SELECT u.id, u.full_name, u.student_id, u.course, u.section, u.completed_at
-                    FROM users u
-                    WHERE COALESCE(u.role,'student')='student'
-                    AND organization_id = %s
-                    AND u.completion_status = 'COMPLETE'
-                    AND u.completed_at IS NOT NULL
-                    ORDER BY u.completed_at DESC
-                    LIMIT 5
-                """)
-                recent_completed = cur.fetchall()
-        
-        return render_template(
-            "admin/dashboard.html",
-            page_title="Dashboard",
-            subtitle=str(today_ph),
-            last_updated=last_updated,
-            active_page="dashboard",
+        top_high_risk=top_high_risk,
+        missing_today_list=missing_today_list,
+        recent_completed=recent_completed,
 
-            total_students=total_students,
-            timed_in_today=timed_in_today,
-            missing_timeout_today=missing_timeout_today,
-            late_today=late_today,
-            completed=completed,
-            high_risk=high_risk,
-            med_risk=med_risk,
+        admin_name=session.get("admin_name", "Admin")
+    )
 
-            top_high_risk=top_high_risk,
-            missing_today_list=missing_today_list,
-            recent_completed=recent_completed,
-
-            admin_name=session.get("admin_name", "Admin")
-        )
 
     finally:
         conn.close()
@@ -1358,12 +1296,14 @@ def admin_dashboard():
 @admin_required
 def admin_students():
     admin_id = session["admin_user_id"]
+    org_id = session.get("org_id")
+
     course = (request.args.get("course") or "").strip().upper()
     section = (request.args.get("section") or "").strip().upper()
     q = (request.args.get("q") or "").strip()
 
-    where = ["COALESCE(u.role,'student')='student'"]
-    params = []
+    where = ["COALESCE(u.role,'student')='student'", "u.organization_id = %s"]
+    params = [org_id]
 
     if course:
         where.append("UPPER(u.course) = %s")
@@ -1397,16 +1337,19 @@ def admin_students():
                       ON rs.user_id = u.id
                      AND rs.snapshot_date = %s
                     WHERE {where_sql}
-                     AND organization_id = %s
                     GROUP BY u.id, rs.risk_level
                     ORDER BY u.course, u.section, u.full_name
                     LIMIT 300
                 """, tuple([today_ph, today_ph] + params))
                 rows = cur.fetchall()
 
-                log_admin_action(cur, admin_id, "PORTAL_STUDENTS_VIEW", target=f"{course} {section}".strip(), metadata={"q": q})
+                log_admin_action(
+                    cur, admin_id,
+                    "PORTAL_STUDENTS_VIEW",
+                    target=f"{course} {section}".strip(),
+                    metadata={"q": q}
+                )
 
-        # compute remaining hours for display
         for r in rows:
             req = int(r.get("required_hours") or 240)
             acc_h = (int(r.get("total_minutes") or 0)) / 60.0
@@ -1416,14 +1359,12 @@ def admin_students():
             if r.get("completion_status") == "COMPLETE":
                 r["risk_level"] = "COMPLETE"
 
-
         return render_template(
             "admin/students.html",
             page_title="Students",
             subtitle="Filter, search, and review progress",
             last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
             active_page="students",
-            
             students=rows,
             course=course,
             section=section,
@@ -1433,7 +1374,6 @@ def admin_students():
     finally:
         conn.close()
 
-
 # =========================================================
 # Student Detail
 # =========================================================
@@ -1442,42 +1382,51 @@ def admin_students():
 @admin_required
 def admin_student_detail(user_id: int):
     admin_id = session["admin_user_id"]
+    org_id = session.get("org_id")
     today_ph = datetime.now(PH_TZ).date()
 
     conn = get_db_connection()
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # ✅ Enforce tenant at the user level (critical)
                 cur.execute("""
                     SELECT id, full_name, student_id, course, section, company_name,
                            required_hours, start_date, end_date,
                            completion_status, completed_at
                     FROM users
-                    WHERE id = %s AND COALESCE(role,'student')='student'
+                    WHERE id = %s
+                      AND COALESCE(role,'student')='student'
                       AND organization_id = %s
-                """, (user_id,))
+                """, (user_id, org_id))
                 u = cur.fetchone()
                 if not u:
                     abort(404)
 
+                # ✅ Pull recent DTR (no org_id column needed on dtr_records)
                 cur.execute("""
                     SELECT date, time_in, time_out, minutes_worked, is_late, late_minutes
                     FROM dtr_records
                     WHERE user_id = %s
                     ORDER BY date DESC
                     LIMIT 30
-                      AND organization_id = %s
                 """, (user_id,))
                 recent = cur.fetchall()
 
+                # ✅ Totals
                 cur.execute("""
                     SELECT COALESCE(SUM(COALESCE(minutes_worked,0)),0) AS total_minutes
-                    FROM dtr_records WHERE user_id = %s
-                      AND organization_id = %s
+                    FROM dtr_records
+                    WHERE user_id = %s
                 """, (user_id,))
                 total_minutes = int(cur.fetchone()["total_minutes"] or 0)
 
-                log_admin_action(cur, admin_id, "PORTAL_STUDENT_VIEW", target=u.get("student_id") or str(user_id))
+                log_admin_action(
+                    cur,
+                    admin_id,
+                    "PORTAL_STUDENT_VIEW",
+                    target=u.get("student_id") or str(user_id)
+                )
 
         req = int(u.get("required_hours") or 240)
         acc_h = total_minutes / 60.0
@@ -1485,6 +1434,11 @@ def admin_student_detail(user_id: int):
 
         return render_template(
             "admin/student_detail.html",
+            page_title="Student",
+            subtitle=u.get("student_id") or "",
+            last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
+            active_page="students",
+
             u=u,
             recent=recent,
             acc_hours=round(acc_h, 2),
@@ -1496,7 +1450,6 @@ def admin_student_detail(user_id: int):
         conn.close()
 
 
-
 # =========================================================
 # Export Page
 # =========================================================
@@ -1505,6 +1458,8 @@ def admin_student_detail(user_id: int):
 @admin_required
 def admin_exports():
     admin_id = session["admin_user_id"]
+    org_id = session.get("org_id")
+
     link = None
     error = None
 
@@ -1515,7 +1470,15 @@ def admin_exports():
         if not course or not section:
             error = "Course and Section are required."
         else:
-            payload = {"course": course, "section": section, "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS}
+            # ✅ bind token to org_id (multi-tenant safety)
+            payload = {
+                "org_id": org_id,
+                "course": course,
+                "section": section,
+                "admin_user_id": admin_id,
+                "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS
+            }
+
             token = make_export_token(payload)
             link = f"https://{request.host}/export/class?token={token}"
 
@@ -1527,8 +1490,126 @@ def admin_exports():
             finally:
                 conn.close()
 
-    return render_template("admin/exports.html", link=link, error=error, admin_name=session.get("admin_name","Admin"))
+    return render_template(
+        "admin/exports.html",
+        page_title="Exports",
+        subtitle="Generate secure CSV links",
+        last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
+        active_page="exports",
+        link=link,
+        error=error,
+        admin_name=session.get("admin_name","Admin")
+    )
 
+
+@app.route("/export/class")
+def export_class_csv():
+    token = request.args.get("token", "")
+    payload = verify_export_token(token)
+    
+    if not payload:
+        return "unauthorized", 401
+
+    # ✅ token-bound scope (multi-tenant safe)
+    org_id = payload.get("org_id")
+    course = (payload.get("course") or "").strip().upper()
+    section = (payload.get("section") or "").strip().upper()
+    admin_user_id = payload.get("admin_user_id")
+
+
+    if not org_id or not course or not section:
+        return "unauthorized", 401
+
+    today_ph = datetime.now(PH_TZ).date()
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute("""
+                    SELECT
+                        u.full_name,
+                        u.student_id,
+                        u.course,
+                        u.section,
+                        u.company_name,
+                        u.required_hours,
+                        u.start_date,
+                        u.end_date,
+                        u.completion_status,
+                        u.completed_at,
+                        COALESCE(SUM(COALESCE(r.minutes_worked,0)),0) AS total_minutes,
+                        SUM(CASE WHEN r.is_late = TRUE THEN 1 ELSE 0 END) AS late_count,
+                        SUM(CASE WHEN r.time_in IS NOT NULL
+                                  AND r.time_out IS NULL
+                                  AND r.date < %s
+                                 THEN 1 ELSE 0 END) AS missing_timeout_count
+                    FROM users u
+                    LEFT JOIN dtr_records r ON r.user_id = u.id
+                    WHERE COALESCE(u.role,'student')='student'
+                      AND u.organization_id = %s
+                      AND UPPER(u.course) = %s
+                      AND UPPER(u.section) = %s
+                    GROUP BY u.id
+                    ORDER BY u.full_name
+                """, (today_ph, org_id, course, section))
+                rows = cur.fetchall()
+
+                # Optional: audit log of download (recommended)
+                # If you don't want to create a public "export download" log, you can remove this.
+                log_admin_action(
+                    cur,
+                    admin_user_id,
+                    "EXPORT_CLASS_DOWNLOAD",
+                    target=f"{course} {section}",
+                    metadata={"org_id": org_id}
+                )
+
+
+        # Build CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "Full Name","Student ID","Course","Section","Company",
+            "Required Hours","Start Date","End Date",
+            "Completion Status","Completed At (UTC)",
+            "Accumulated Hours","Remaining Hours",
+            "Late Count","Missing Time-outs (Past Days)"
+        ])
+
+        for r in rows:
+            required_hours = int(r["required_hours"] or 240)
+            total_minutes = int(r["total_minutes"] or 0)
+            acc_hours = total_minutes / 60.0
+            remaining = max(0.0, required_hours - acc_hours)
+
+            writer.writerow([
+                r.get("full_name",""),
+                r.get("student_id",""),
+                r.get("course",""),
+                r.get("section",""),
+                r.get("company_name",""),
+                required_hours,
+                r.get("start_date",""),
+                r.get("end_date",""),
+                r.get("completion_status","IN_PROGRESS"),
+                r.get("completed_at",""),
+                f"{acc_hours:.2f}",
+                f"{remaining:.2f}",
+                int(r.get("late_count") or 0),
+                int(r.get("missing_timeout_count") or 0),
+            ])
+
+        csv_data = output.getvalue()
+        filename = f"OJT_ORG{org_id}_{course}_{section}_export.csv"
+
+        return Response(
+            csv_data,
+            mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+        )
+    finally:
+        conn.close()
 
 # =========================================================
 # Log page
@@ -1940,6 +2021,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
