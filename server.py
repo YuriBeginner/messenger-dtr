@@ -1209,6 +1209,7 @@ def admin_dashboard():
     today_ph = datetime.now(PH_TZ).date()
     admin_id = session["admin_user_id"]
     org_id = session.get("org_id")
+    start_7d = today_ph - timedelta(days=6)
 
     conn = get_db_connection()
     try:
@@ -1257,6 +1258,37 @@ def admin_dashboard():
                       AND u.organization_id = %s
                 """, (today_ph, org_id))
                 late_today = int(cur.fetchone()["c"])
+
+                # ✅ 7-day trend (Timed In + Late) — org scoped 
+                cur.execute("""
+                    SELECT r.date,
+                           COUNT(DISTINCT r.user_id) FILTER (WHERE r.time_in IS NOT NULL) AS timed_in,
+                           COUNT(*) FILTER (WHERE r.is_late = TRUE) AS late
+                    FROM dtr_records r
+                    JOIN users u ON u.id = r.user_id
+                    WHERE r.date >= %s
+                      AND r.date <= %s
+                      AND u.organization_id = %s
+                      AND COALESCE(u.role,'student')='student'
+                    GROUP BY r.date
+                    ORDER BY r.date ASC
+                """, (start_7d, today_ph, org_id))
+                
+                trend_rows = cur.fetchall()
+                
+                # Build complete 7-day series (fill missing dates with 0)
+                trend_map = {row["date"]: row for row in trend_rows}
+                trend_labels = []
+                trend_timed_in = []
+                trend_late = []
+                
+                for i in range(7):
+                    d = start_7d + timedelta(days=i)
+                    trend_labels.append(d.strftime("%b %d"))  # e.g. Feb 19
+                    row = trend_map.get(d) or {}
+                    trend_timed_in.append(int(row.get("timed_in") or 0))
+                    trend_late.append(int(row.get("late") or 0))
+
     
                 # ✅ completed count
                 cur.execute("""
@@ -2160,6 +2192,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
