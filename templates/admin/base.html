@@ -6,15 +6,20 @@
   <title>{{ page_title or "OJT Management Portal" }}</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
 
-  <style>
-    :root{
-      --bg: #f6f6f7;
-      --card: #ffffff;
-      --text: #111827;
-      --muted: #6b7280;
-      --line: #e5e7eb;
-      --shadow: 0 1px 2px rgba(0,0,0,.05), 0 10px 24px rgba(0,0,0,.06);
-    }
+<style>
+  :root{
+    --bg: #f6f6f7;
+    --card: #ffffff;
+    --text: #111827;
+    --muted: #6b7280;
+    --line: #e5e7eb;
+    --shadow: 0 1px 2px rgba(0,0,0,.05), 0 10px 24px rgba(0,0,0,.06);
+
+    /* ✅ Org branding (falls back safely) */
+    --brand-primary: {{ organization.primary_color if organization and organization.primary_color else '#111827' }};
+    --brand-secondary: {{ organization.secondary_color if organization and organization.secondary_color else '#3b82f6' }};
+  }
+
 
     body { background: var(--bg); color: var(--text); }
 
@@ -59,7 +64,7 @@
       font-size: 0.9rem;
     }
     .nav-pill:hover { background:#f3f4f6; border-color:#eef0f3; }
-    .nav-pill.active { background:#111827; color:#fff; }
+    .nav-pill.active { background: var(--brand-primary); color:#fff; }
     .nav-section { margin-top: 10px; }
 
     /* Content */
@@ -130,6 +135,13 @@
       padding: 0.55rem 0.85rem;
       font-weight: 650;
     }
+    .btn-primary {
+    background: var(--brand-secondary);
+    border-color: var(--brand-secondary);
+  }
+  .btn-primary:hover {
+    filter: brightness(0.95);
+  }
 
     /* Mobile */
     @media (max-width: 992px) {
@@ -144,8 +156,14 @@
 <div class="app-shell d-lg-flex">
   <!-- Sidebar -->
   <aside class="sidebar">
-    <div class="brand">
-      OJT Management Portal
+    <div class="brand text-center">
+      {% if organization and organization.logo_url %}
+        <img src="{{ organization.logo_url }}" alt="Logo"
+             style="max-height:60px; max-width:100%; object-fit:contain;"
+             class="mb-2">
+      {% endif %}
+    
+      <div>{{ organization.name if organization else "OJT Management Portal" }}</div>
       <small>Attendance &amp; Compliance</small>
     </div>
 
@@ -154,6 +172,7 @@
       <a class="nav-pill {{ 'active' if active_page=='students' else '' }}" href="/admin/students">Students</a>
       <a class="nav-pill {{ 'active' if active_page=='exports' else '' }}" href="/admin/exports">Exports</a>
       <a class="nav-pill {{ 'active' if active_page=='logs' else '' }}" href="/admin/logs">Logs</a>
+      <a class="nav-pill {{ 'active' if active_page=='organization' else '' }}" href="/admin/organization">Organization</a>
     </nav>
 
     <div class="mt-4 pt-3 border-top" style="border-color: var(--line) !important;">
