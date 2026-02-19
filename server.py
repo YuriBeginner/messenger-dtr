@@ -1287,7 +1287,7 @@ def admin_dashboard():
             admin_name=session.get("admin_name", "Admin")
         )
     
-     finally:
+    finally:
         conn.close()
 
 # =========================================================
@@ -2022,6 +2022,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
