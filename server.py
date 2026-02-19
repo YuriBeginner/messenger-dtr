@@ -1263,29 +1263,28 @@ def admin_dashboard():
 
             log_admin_action(cur, admin_id, "PORTAL_DASHBOARD_VIEW", target=str(today_ph))
 
-    return render_template(
-        "admin/dashboard.html",
-        page_title="Dashboard",
-        subtitle=str(today_ph),
-        last_updated=last_updated,
-        active_page="dashboard",
+        return render_template(
+            "admin/dashboard.html",
+            page_title="Dashboard",
+            subtitle=str(today_ph),
+            last_updated=last_updated,
+            active_page="dashboard",
     
-        total_students=total_students,
-        timed_in_today=timed_in_today,
-        missing_timeout_today=missing_timeout_today,
-        late_today=late_today,
-        completed=completed,
-        high_risk=high_risk,
-        med_risk=med_risk,
+            total_students=total_students,
+            timed_in_today=timed_in_today,
+            missing_timeout_today=missing_timeout_today,
+            late_today=late_today,
+            completed=completed,
+            high_risk=high_risk,
+            med_risk=med_risk,
 
-        top_high_risk=top_high_risk,
-        missing_today_list=missing_today_list,
-        recent_completed=recent_completed,
+            top_high_risk=top_high_risk,
+            missing_today_list=missing_today_list,
+            recent_completed=recent_completed,
 
-        admin_name=session.get("admin_name", "Admin")
-    )
-
-
+            admin_name=session.get("admin_name", "Admin")
+        )
+    
     finally:
         conn.close()
 
@@ -2021,6 +2020,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
