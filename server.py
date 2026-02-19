@@ -1387,6 +1387,10 @@ def admin_dashboard():
             missing_today_list=missing_today_list,
             recent_completed=recent_completed,
 
+            trend_labels=trend_labels,
+            trend_timed_in=trend_timed_in,
+            trend_late=trend_late,
+
             admin_name=session.get("admin_name", "Admin")
         )
     
@@ -2192,6 +2196,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
