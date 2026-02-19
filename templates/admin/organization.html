@@ -1,0 +1,51 @@
+{% extends "admin/base.html" %}
+{% block content %}
+
+{% if error %}
+  <div class="alert alert-danger">{{ error }}</div>
+{% endif %}
+{% if success %}
+  <div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+<div class="card-soft p-3">
+  <div class="mb-3">
+    <div class="fw-semibold">Branding</div>
+    <div class="subtle">Customize how this portal looks for your institution.</div>
+  </div>
+
+  <form method="POST">
+    <div class="mb-3">
+      <label class="form-label">Organization Name</label>
+      <input class="form-control" value="{{ org.name }}" disabled>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Logo URL</label>
+      <input name="logo_url" class="form-control" value="{{ org.logo_url or '' }}" placeholder="https://.../logo.png">
+      <div class="subtle mt-1">MVP: paste a hosted logo URL (PNG/JPG/SVG). Upload support comes next.</div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label">Primary Color</label>
+        <input name="primary_color" class="form-control" value="{{ org.primary_color or '' }}" placeholder="#111827">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label">Secondary Color</label>
+        <input name="secondary_color" class="form-control" value="{{ org.secondary_color or '' }}" placeholder="#3b82f6">
+      </div>
+    </div>
+
+    <button class="btn btn-primary mt-3" type="submit">Save Branding</button>
+  </form>
+</div>
+
+{% if org.logo_url %}
+  <div class="card-soft p-3 mt-3">
+    <div class="fw-semibold mb-2">Preview</div>
+    <img src="{{ org.logo_url }}" style="max-height:80px; max-width:100%; object-fit:contain;">
+  </div>
+{% endif %}
+
+{% endblock %}
