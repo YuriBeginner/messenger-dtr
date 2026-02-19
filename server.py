@@ -20,6 +20,26 @@ from functools import wraps
 
 
 app = Flask(__name__)
+@app.context_processor
+def inject_org_branding():
+    org_id = session.get("org_id")
+    if not org_id:
+        return {"organization": None}
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                org = get_org_branding(cur, org_id)
+                return {"organization": org}
+    except Exception:
+        return {"organization": None}
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
 
 VERIFY_TOKEN = "ojt_dtr_token"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
@@ -120,6 +140,19 @@ def verify_export_token(token: str) -> dict | None:
         return payload
     except Exception:
         return None
+# =========================================================
+# Org branding
+# =========================================================
+
+def get_org_branding(cur, org_id: int):
+    cur.execute("""
+        SELECT id, name, logo_url, primary_color, secondary_color
+        FROM organizations
+        WHERE id = %s
+        LIMIT 1
+    """, (org_id,))
+    return cur.fetchone()
+
 
 
 # =========================================================
@@ -484,6 +517,7 @@ def compute_risk_score(today_ph: date, end: date, required_hours: int,
         level = "LOW"
 
     return score, level, reasons
+                           
 
 
 # =========================================================
@@ -2063,6 +2097,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
