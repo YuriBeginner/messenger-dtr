@@ -199,25 +199,39 @@
   </div>
 </div>
 
-<script>
-  (function(){
-    const el = document.getElementById("riskDonut");
-    if (!el) return;
+<div class="card-soft">
+  <div class="d-flex align-items-center justify-content-between">
+    <div class="fw-bold">Quick Actions</div>
+    <div class="subtle">Most used admin workflows</div>
+  </div>
 
+  <div class="d-flex flex-wrap gap-2 mt-3">
+    <a class="btn btn-dark btn-sm" href="/admin/students">View Students</a>
+    <a class="btn btn-outline-dark btn-sm" href="/admin/exports">Generate Export</a>
+    <a class="btn btn-outline-dark btn-sm" href="/admin/logs">View Logs</a>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+
+  // =====================
+  // RISK DONUT
+  // =====================
+  const donut = document.getElementById("riskDonut");
+  if (donut && window.Chart) {
     const high = Number("{{ high_risk|default(0) }}");
     const med  = Number("{{ med_risk|default(0) }}");
     const low  = Number("{{ low_risk|default(0) }}");
-
     const total = high + med + low;
 
-    // If no snapshot data, show a “no data” donut
     const data = total > 0 ? [high, med, low] : [1];
     const labels = total > 0 ? ["High", "Medium", "Low"] : ["No data"];
-    const colors = total > 0
-      ? ["#ef4444", "#f59e0b", "#22c55e"]
-      : ["#e5e7eb"];
+    const colors = total > 0 ? ["#ef4444", "#f59e0b", "#22c55e"] : ["#e5e7eb"];
 
-    new Chart(el, {
+    new Chart(donut, {
       type: "doughnut",
       data: {
         labels,
@@ -232,85 +246,45 @@
         responsive: true,
         maintainAspectRatio: false,
         cutout: "70%",
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: function(ctx){
-                if (total === 0) return "No snapshot yet";
-                const v = ctx.raw || 0;
-                const pct = Math.round((v / total) * 100);
-                return `${ctx.label}: ${v} (${pct}%)`;
-              }
-            }
-          }
-        }
+        plugins: { legend: { display: false } }
       }
     });
-  })();
-</script>
+  }
 
+  // =====================
+  // 7-DAY TREND
+  // =====================
+  const trend = document.getElementById("trendChart");
+  if (trend && window.Chart) {
+    const labels  = {{ (trend_labels or [])|tojson }};
+    const timedIn = {{ (trend_timed_in or [])|tojson }};
+    const late    = {{ (trend_late or [])|tojson }};
 
-
-<div class="mt-4">
-  <div class="card-soft">
-    <div class="d-flex align-items-center justify-content-between">
-      <div class="fw-bold">Quick Actions</div>
-      <div class="subtle">Most used admin workflows</div>
-    </div>
-  
-    <div class="d-flex flex-wrap gap-2 mt-3">
-      <a class="btn btn-dark btn-sm" href="/admin/students">View Students</a>
-      <a class="btn btn-outline-dark btn-sm" href="/admin/exports">Generate Export</a>
-      <a class="btn btn-outline-dark btn-sm" href="/admin/logs">View Logs</a>
-    </div>
-  </div>
-
-<script>
-  (function () {
-    const el = document.getElementById("trendChart");
-    if (!el) return;
-
-    const labels = {{ trend_labels|tojson }};
-    const timedIn = {{ trend_timed_in|tojson }};
-    const late = {{ trend_late|tojson }};
-
-    new Chart(el, {
+    new Chart(trend, {
       type: "bar",
       data: {
-        labels: labels,
+        labels,
         datasets: [
-          {
-            label: "Timed In",
-            data: timedIn,
-            borderWidth: 0,
-            borderRadius: 8
-          },
-          {
-            label: "Late",
-            data: late,
-            borderWidth: 0,
-            borderRadius: 8
-          }
+          { label: "Timed In", data: timedIn, borderWidth: 0, borderRadius: 8 },
+          { label: "Late", data: late, borderWidth: 0, borderRadius: 8 }
         ]
       },
       options: {
         responsive: true,
         maintainAspectRatio: false,
-        plugins: {
-          legend: { position: "bottom" },
-          tooltip: { enabled: true }
-        },
+        plugins: { legend: { position: "bottom" } },
         scales: {
           x: { grid: { display: false } },
           y: { beginAtZero: true, ticks: { precision: 0 } }
         }
       }
     });
-  })();
+  }
+
+});
 </script>
+
 </div>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 {% endblock %}
 
 
