@@ -2051,6 +2051,14 @@ def admin_help_text() -> str:
 # Home
 # =========================================================
 
+@app.template_filter("ph_dt")
+def ph_dt_filter(dt):
+    if not dt:
+        return "—"
+    dt = as_aware_utc(dt)
+    return dt.astimezone(PH_TZ).strftime("%Y-%m-%d %I:%M %p")
+
+
 @app.route("/privacy")
 def privacy():
     return render_template("privacy.html")
@@ -2058,6 +2066,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
