@@ -1149,122 +1149,121 @@ def admin_dashboard():
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-
-
+                
             # ✅ totals (org scoped)
-            cur.execute("""
-                SELECT COUNT(*) AS c
-                FROM users
-                WHERE COALESCE(role,'student')='student'
-                  AND organization_id = %s
-            """, (org_id,))
-            total_students = int(cur.fetchone()["c"])
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM users
+                    WHERE COALESCE(role,'student')='student'
+                      AND organization_id = %s
+                """, (org_id,))
+                total_students = int(cur.fetchone()["c"])
+        
+                # ✅ timed in today (org scoped via JOIN users)
+                cur.execute("""
+                    SELECT COUNT(DISTINCT r.user_id) AS c
+                    FROM dtr_records r
+                    JOIN users u ON u.id = r.user_id
+                    WHERE r.date = %s
+                      AND r.time_in IS NOT NULL
+                      AND u.organization_id = %s
+                """, (today_ph, org_id))
+                timed_in_today = int(cur.fetchone()["c"])
     
-            # ✅ timed in today (org scoped via JOIN users)
-            cur.execute("""
-                SELECT COUNT(DISTINCT r.user_id) AS c
-                FROM dtr_records r
-                JOIN users u ON u.id = r.user_id
-                WHERE r.date = %s
-                  AND r.time_in IS NOT NULL
-                  AND u.organization_id = %s
-            """, (today_ph, org_id))
-            timed_in_today = int(cur.fetchone()["c"])
-
-            # ✅ missing time-out today
-            cur.execute("""
-                SELECT COUNT(*) AS c
-                FROM dtr_records r
-                JOIN users u ON u.id = r.user_id
-                WHERE r.date = %s
-                  AND r.time_in IS NOT NULL
-                  AND r.time_out IS NULL
-                  AND u.organization_id = %s
-            """, (today_ph, org_id))
-            missing_timeout_today = int(cur.fetchone()["c"])
+                # ✅ missing time-out today
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM dtr_records r
+                    JOIN users u ON u.id = r.user_id
+                    WHERE r.date = %s
+                      AND r.time_in IS NOT NULL
+                      AND r.time_out IS NULL
+                      AND u.organization_id = %s
+                """, (today_ph, org_id))
+                missing_timeout_today = int(cur.fetchone()["c"])
+        
+                # ✅ late today
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM dtr_records r
+                    JOIN users u ON u.id = r.user_id
+                    WHERE r.date = %s
+                      AND r.is_late = TRUE
+                      AND u.organization_id = %s
+                """, (today_ph, org_id))
+                late_today = int(cur.fetchone()["c"])
     
-            # ✅ late today
-            cur.execute("""
-                SELECT COUNT(*) AS c
-                FROM dtr_records r
-                JOIN users u ON u.id = r.user_id
-                WHERE r.date = %s
-                  AND r.is_late = TRUE
-                  AND u.organization_id = %s
-            """, (today_ph, org_id))
-            late_today = int(cur.fetchone()["c"])
-
-            # ✅ completed count
-            cur.execute("""
-                SELECT COUNT(*) AS c
-                FROM users
-                WHERE COALESCE(role,'student')='student'
-                  AND organization_id = %s
-                  AND completion_status = 'COMPLETE'
-            """, (org_id,))
-            completed = int(cur.fetchone()["c"])
-
-            # ✅ risk snapshot counts (scoped)
-            cur.execute("""
-                SELECT
-                    SUM(CASE WHEN rs.risk_level='HIGH' THEN 1 ELSE 0 END) AS high,
-                    SUM(CASE WHEN rs.risk_level='MED'  THEN 1 ELSE 0 END) AS med
-                FROM risk_snapshots rs
-                JOIN users u ON u.id = rs.user_id
-                WHERE rs.snapshot_date = %s
-                  AND u.organization_id = %s
-            """, (today_ph, org_id))
-            rs = cur.fetchone() or {}
-            high_risk = int(rs.get("high") or 0)
-            med_risk = int(rs.get("med") or 0)
-
-            last_updated = datetime.now(PH_TZ).strftime("%I:%M %p")
-
-            # ✅ Top 5 HIGH risk today
-            cur.execute("""
-                SELECT u.id, u.full_name, u.student_id, u.course, u.section,
-                       COALESCE(rs.accumulated_hours, 0) AS accumulated_hours,
-                       COALESCE(rs.expected_hours, 0) AS expected_hours
-                FROM risk_snapshots rs
-                JOIN users u ON u.id = rs.user_id
-                WHERE rs.snapshot_date = %s
-                  AND rs.risk_level = 'HIGH'
-                  AND COALESCE(u.role,'student')='student'
-                  AND u.organization_id = %s
-                ORDER BY (COALESCE(rs.expected_hours,0) - COALESCE(rs.accumulated_hours,0)) DESC
-                LIMIT 5
-            """, (today_ph, org_id))
-            top_high_risk = cur.fetchall()
-
-            # ✅ Missing TIME OUT today list
-            cur.execute("""
-                SELECT u.id, u.full_name, u.student_id, u.course, u.section
-                FROM dtr_records r
-                JOIN users u ON u.id = r.user_id
-                WHERE r.date = %s
-                  AND r.time_in IS NOT NULL
-                  AND r.time_out IS NULL
-                  AND COALESCE(u.role,'student')='student'
-                  AND u.organization_id = %s
-                ORDER BY u.course, u.section, u.full_name
-                LIMIT 8
-            """, (today_ph, org_id))
-            missing_today_list = cur.fetchall()
-
-            # ✅ Recently completed
-            cur.execute("""
-                SELECT u.id, u.full_name, u.student_id, u.course, u.section, u.completed_at
-                FROM users u
-                WHERE COALESCE(u.role,'student')='student'
-                  AND u.organization_id = %s
-                  AND u.completion_status = 'COMPLETE'
-                  AND u.completed_at IS NOT NULL
-                ORDER BY u.completed_at DESC
-                LIMIT 5
-            """, (org_id,))
-            recent_completed = cur.fetchall()
-
-            log_admin_action(cur, admin_id, "PORTAL_DASHBOARD_VIEW", target=str(today_ph))
+                # ✅ completed count
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM users
+                    WHERE COALESCE(role,'student')='student'
+                      AND organization_id = %s
+                      AND completion_status = 'COMPLETE'
+                """, (org_id,))
+                completed = int(cur.fetchone()["c"])
+    
+                # ✅ risk snapshot counts (scoped)
+                cur.execute("""
+                    SELECT
+                        SUM(CASE WHEN rs.risk_level='HIGH' THEN 1 ELSE 0 END) AS high,
+                        SUM(CASE WHEN rs.risk_level='MED'  THEN 1 ELSE 0 END) AS med
+                    FROM risk_snapshots rs
+                    JOIN users u ON u.id = rs.user_id
+                    WHERE rs.snapshot_date = %s
+                      AND u.organization_id = %s
+                """, (today_ph, org_id))
+                rs = cur.fetchone() or {}
+                high_risk = int(rs.get("high") or 0)
+                med_risk = int(rs.get("med") or 0)
+    
+                last_updated = datetime.now(PH_TZ).strftime("%I:%M %p")
+    
+                # ✅ Top 5 HIGH risk today
+                cur.execute("""
+                    SELECT u.id, u.full_name, u.student_id, u.course, u.section,
+                           COALESCE(rs.accumulated_hours, 0) AS accumulated_hours,
+                           COALESCE(rs.expected_hours, 0) AS expected_hours
+                    FROM risk_snapshots rs
+                    JOIN users u ON u.id = rs.user_id
+                    WHERE rs.snapshot_date = %s
+                      AND rs.risk_level = 'HIGH'
+                      AND COALESCE(u.role,'student')='student'
+                      AND u.organization_id = %s
+                    ORDER BY (COALESCE(rs.expected_hours,0) - COALESCE(rs.accumulated_hours,0)) DESC
+                    LIMIT 5
+                """, (today_ph, org_id))
+                top_high_risk = cur.fetchall()
+    
+                # ✅ Missing TIME OUT today list
+                cur.execute("""
+                    SELECT u.id, u.full_name, u.student_id, u.course, u.section
+                    FROM dtr_records r
+                    JOIN users u ON u.id = r.user_id
+                    WHERE r.date = %s
+                      AND r.time_in IS NOT NULL
+                      AND r.time_out IS NULL
+                      AND COALESCE(u.role,'student')='student'
+                      AND u.organization_id = %s
+                    ORDER BY u.course, u.section, u.full_name
+                    LIMIT 8
+                """, (today_ph, org_id))
+                missing_today_list = cur.fetchall()
+    
+                # ✅ Recently completed
+                cur.execute("""
+                    SELECT u.id, u.full_name, u.student_id, u.course, u.section, u.completed_at
+                    FROM users u
+                    WHERE COALESCE(u.role,'student')='student'
+                      AND u.organization_id = %s
+                      AND u.completion_status = 'COMPLETE'
+                      AND u.completed_at IS NOT NULL
+                    ORDER BY u.completed_at DESC
+                    LIMIT 5
+                """, (org_id,))
+                recent_completed = cur.fetchall()
+    
+                log_admin_action(cur, admin_id, "PORTAL_DASHBOARD_VIEW", target=str(today_ph))
 
         return render_template(
             "admin/dashboard.html",
@@ -2023,6 +2022,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
