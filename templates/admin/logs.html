@@ -1,22 +1,57 @@
 {% extends "admin/base.html" %}
 {% block content %}
-<h3 class="mb-3">Admin Activity Logs</h3>
+
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <h3 class="mb-0">Admin Activity Logs</h3>
+    <div class="text-muted small">{{ organization.name if organization else '' }}</div>
+  </div>
+</div>
 
 <div class="card shadow-sm">
   <div class="table-responsive">
-    <table class="table table-sm mb-0">
-      <thead><tr><th>When (UTC)</th><th>Who</th><th>Action</th><th>Target</th></tr></thead>
-      <tbody>
-      {% for r in rows %}
+    <table class="table table-sm mb-0 align-middle">
+      <thead>
         <tr>
-          <td>{{ r.created_at }}</td>
-          <td>{{ r.full_name }}</td>
-          <td>{{ r.action }}</td>
-          <td>{{ r.target }}</td>
+          <th class="text-nowrap">When (PH)</th>
+          <th>Who</th>
+          <th>Action</th>
+          <th>Target</th>
         </tr>
-      {% endfor %}
+      </thead>
+      <tbody>
+      {% if rows|length == 0 %}
+        <tr>
+          <td colspan="4" class="text-center text-muted py-4">
+            No activity logs found.
+          </td>
+        </tr>
+      {% else %}
+        {% for r in rows %}
+          <tr>
+            <td class="text-nowrap">{{ r.created_at|ph_dt }}</td>
+            <td>{{ r.full_name }}</td>
+
+            <td>
+              {% set a = r.action or '' %}
+              {% if 'EXPORT' in a %}
+                <span class="badge bg-primary">{{ a }}</span>
+              {% elif 'LOGIN' in a or 'LOGOUT' in a %}
+                <span class="badge bg-info text-dark">{{ a }}</span>
+              {% elif 'DELETE' in a or 'SUSPEND' in a %}
+                <span class="badge bg-danger">{{ a }}</span>
+              {% else %}
+                <span class="badge bg-secondary">{{ a }}</span>
+              {% endif %}
+            </td>
+
+            <td>{{ r.target or '—' }}</td>
+          </tr>
+        {% endfor %}
+      {% endif %}
       </tbody>
     </table>
   </div>
 </div>
+
 {% endblock %}
