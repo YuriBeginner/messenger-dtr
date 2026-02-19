@@ -1706,6 +1706,63 @@ def admin_logs():
         return render_template("admin/logs.html", rows=rows, admin_name=session.get("admin_name","Admin"))
     finally:
         conn.close()
+# =========================================================
+# ADMIN Org
+# =========================================================
+
+@app.route("/admin/organization", methods=["GET","POST"])
+@admin_required
+def admin_organization():
+    admin_id = session["admin_user_id"]
+    org_id = session["org_id"]
+
+    error = None
+    success = None
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                if request.method == "POST":
+                    logo_url = (request.form.get("logo_url") or "").strip()
+                    primary_color = (request.form.get("primary_color") or "").strip()
+                    secondary_color = (request.form.get("secondary_color") or "").strip()
+
+                    if primary_color and not primary_color.startswith("#"):
+                        error = "Primary color must be hex like #111827"
+                    elif secondary_color and not secondary_color.startswith("#"):
+                        error = "Secondary color must be hex like #3b82f6"
+                    else:
+                        cur.execute("""
+                            UPDATE organizations
+                            SET logo_url = NULLIF(%s,''),
+                                primary_color = NULLIF(%s,''),
+                                secondary_color = NULLIF(%s,'')
+                            WHERE id = %s
+                        """, (logo_url, primary_color, secondary_color, org_id))
+
+                        log_admin_action(cur, admin_id, "ORG_BRANDING_UPDATE", metadata={
+                            "logo_url_set": bool(logo_url),
+                            "primary_color": primary_color or None,
+                            "secondary_color": secondary_color or None
+                        })
+                        success = "Branding updated."
+
+                org = get_org_branding(cur, org_id)
+
+        return render_template(
+            "admin/organization.html",
+            page_title="Organization",
+            subtitle="Branding settings",
+            last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
+            active_page="organization",
+            error=error,
+            success=success,
+            org=org,
+            admin_name=session.get("admin_name","Admin")
+        )
+    finally:
+        conn.close()
 
 
 # =========================================================
@@ -2097,6 +2154,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
