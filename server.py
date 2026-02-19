@@ -1272,15 +1272,20 @@ def admin_dashboard():
                 cur.execute("""
                     SELECT
                         SUM(CASE WHEN rs.risk_level='HIGH' THEN 1 ELSE 0 END) AS high,
-                        SUM(CASE WHEN rs.risk_level='MED'  THEN 1 ELSE 0 END) AS med
+                        SUM(CASE WHEN rs.risk_level='MED'  THEN 1 ELSE 0 END) AS med,
+                        SUM(CASE WHEN rs.risk_level='LOW'  THEN 1 ELSE 0 END) AS low
                     FROM risk_snapshots rs
                     JOIN users u ON u.id = rs.user_id
                     WHERE rs.snapshot_date = %s
                       AND u.organization_id = %s
+                      AND COALESCE(u.role,'student')='student'
                 """, (today_ph, org_id))
+                
                 rs = cur.fetchone() or {}
                 high_risk = int(rs.get("high") or 0)
-                med_risk = int(rs.get("med") or 0)
+                med_risk  = int(rs.get("med") or 0)
+                low_risk  = int(rs.get("low") or 0)
+
     
                 last_updated = datetime.now(PH_TZ).strftime("%I:%M %p")
     
@@ -1344,6 +1349,7 @@ def admin_dashboard():
             completed=completed,
             high_risk=high_risk,
             med_risk=med_risk,
+            low_risk=low_risk,
 
             top_high_risk=top_high_risk,
             missing_today_list=missing_today_list,
@@ -2154,6 +2160,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
