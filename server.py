@@ -140,6 +140,22 @@ def get_user_role(cur, sender_id: str):
         return None
     return row.get("role", "student")
 
+def get_admin_scope_by_messenger(cur, sender_id: str):
+    """
+    Returns (admin_user_id, org_id) for an admin messenger user.
+    """
+    cur.execute("""
+        SELECT id, organization_id, role
+        FROM users
+        WHERE messenger_id = %s
+        LIMIT 1
+    """, (sender_id,))
+    u = cur.fetchone()
+    if not u or u.get("role") != "admin":
+        return None, None
+    return u["id"], u["organization_id"]
+
+
 
 # =========================================================
 # Messenger
@@ -644,22 +660,37 @@ def webhook():
                             return "ok", 200
 
                         # ADMIN EXPORT CLASS <course> <section>
+                        # ADMIN EXPORT CLASS <course> <section>
                         if cmd.startswith("ADMIN EXPORT CLASS"):
-                            if len(parts) != 5:
-                                send_message(sender_id, usage(
-                                    "ADMIN EXPORT CLASS",
-                                    "ADMIN EXPORT CLASS <course> <section>",
-                                    "ADMIN EXPORT CLASS BSECE 4B"
-                                ))
-                                return "ok", 200
-
-                            course = parts[3].upper()
-                            section = parts[4].upper()
-                            payload = {"course": course, "section": section, "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS}
-                            token = make_export_token(payload)
-                            link = f"https://{request.host}/export/class?token={token}"
-                            send_message(sender_id, f"📄 Export ready (valid for 5 minutes):\n{link}")
+                        if len(parts) != 5:
+                            send_message(sender_id, usage(
+                                "ADMIN EXPORT CLASS",
+                                "ADMIN EXPORT CLASS <course> <section>",
+                                "ADMIN EXPORT CLASS BSECE 4B"
+                            ))
                             return "ok", 200
+                    
+                        course = parts[3].upper()
+                        section = parts[4].upper()
+                    
+                        admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
+                        if not admin_user_id or not org_id:
+                            send_message(sender_id, "⛔ Admin access required.")
+                            return "ok", 200
+                    
+                        payload = {
+                            "org_id": org_id,
+                            "admin_user_id": admin_user_id,
+                            "course": course,
+                            "section": section,
+                            "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS
+                        }
+                    
+                        token = make_export_token(payload)
+                        link = f"https://{request.host}/export/class?token={token}"
+                        send_message(sender_id, f"📄 Export ready (valid for 5 minutes):\n{link}")
+                        return "ok", 200
+
 
                         # Unknown admin command (clean)
                         send_message(sender_id, "Unknown admin command. Type: ADMIN HELP")
@@ -1620,6 +1651,7 @@ def export_class_csv():
 @admin_required
 def admin_logs():
     admin_id = session["admin_user_id"]
+    org_id = session.get("org_id")
 
     conn = get_db_connection()
     try:
@@ -1629,17 +1661,21 @@ def admin_logs():
                     SELECT l.created_at, l.action, l.target, u.full_name
                     FROM admin_activity_logs l
                     JOIN users u ON u.id = l.admin_user_id
+                    WHERE u.organization_id = %s
                     ORDER BY l.created_at DESC
                     LIMIT 50
-                      AND organization_id = %s
-                """)
+                """, (org_id,))
                 rows = cur.fetchall()
+
                 log_admin_action(cur, admin_id, "PORTAL_LOGS_VIEW")
-        return render_template("admin/logs.html", rows=rows, admin_name=session.get("admin_name","Admin"))
+
+        return render_template(
+            "admin/logs.html",
+            rows=rows,
+            admin_name=session.get("admin_name","Admin")
+        )
     finally:
         conn.close()
-
-
 
 # =========================================================
 # ADMIN handlers
@@ -2022,6 +2058,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
