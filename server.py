@@ -1698,7 +1698,7 @@ def generate_join_code(length=6):
 
 def get_or_create_org_join_code(cur, org_id: int) -> str:
     # 1) Try existing
-    cur.execute("SELECT code FROM org_join_codes WHERE org_id=%s", (org_id,))
+    cur.execute("SELECT code FROM org_join_codes WHERE organization_id=%s", (org_id,))
     row = cur.fetchone()
     if row and row.get("code"):
         return row["code"]
@@ -1708,9 +1708,9 @@ def get_or_create_org_join_code(cur, org_id: int) -> str:
     for _ in range(8):
         try:
             cur.execute("""
-                INSERT INTO org_join_codes (org_id, code, created_at)
+                INSERT INTO org_join_codes (organization_id, code, created_at)
                 VALUES (%s, %s, now())
-                ON CONFLICT (org_id)
+                ON CONFLICT (organization_id)
                 DO UPDATE SET code = EXCLUDED.code, created_at = now()
             """, (org_id, code))
             return code
@@ -1939,9 +1939,9 @@ def admin_organization():
                         for _ in range(6):
                             try:
                                 cur.execute("""
-                                    INSERT INTO org_join_codes (org_id, code, created_at)
+                                    INSERT INTO org_join_codes (organization_id, code, created_at)
                                     VALUES (%s, %s, now())
-                                    ON CONFLICT (org_id)
+                                    ON CONFLICT (organization_id)
                                     DO UPDATE SET code = EXCLUDED.code, created_at = now()
                                 """, (org_id, new_code))
                                 join_code = new_code
@@ -2363,6 +2363,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
