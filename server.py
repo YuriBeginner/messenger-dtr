@@ -1694,63 +1694,7 @@ def generate_join_code(length=6):
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no confusing chars
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
-@app.route("/admin/organization", methods=["GET", "POST"])
-@admin_required
-def admin_organization():
-    admin_id = session["admin_user_id"]
-    org_id = session.get("org_id")
 
-    conn = get_db_connection()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # org info
-                cur.execute("SELECT id, name FROM organizations WHERE id=%s", (org_id,))
-                org = cur.fetchone()
-
-                code = None
-
-                # get current active code
-                cur.execute("""
-                    SELECT code
-                    FROM org_join_codes
-                    WHERE organization_id=%s AND is_active=TRUE
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                """, (org_id,))
-                row = cur.fetchone()
-                if row:
-                    code = row["code"]
-
-                if request.method == "POST":
-                    # deactivate old codes (one active code at a time)
-                    cur.execute("""
-                        UPDATE org_join_codes
-                        SET is_active=FALSE
-                        WHERE organization_id=%s AND is_active=TRUE
-                    """, (org_id,))
-
-                    new_code = generate_join_code(6)
-                    cur.execute("""
-                        INSERT INTO org_join_codes (organization_id, code, is_active, created_by_admin_user_id)
-                        VALUES (%s, %s, TRUE, %s)
-                    """, (org_id, new_code, admin_id))
-
-                    code = new_code
-                    log_admin_action(cur, admin_id, "PORTAL_JOIN_CODE_GENERATE", target=str(org_id))
-
-        return render_template(
-            "admin/organization.html",
-            page_title="Organization",
-            subtitle="Branding & onboarding",
-            last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
-            active_page="organization",
-            admin_name=session.get("admin_name","Admin"),
-            org=org,
-            join_code=code
-        )
-    finally:
-        conn.close()
 
 
 @app.route("/export/class")
@@ -1904,11 +1848,11 @@ def admin_logs():
 # ADMIN Org
 # =========================================================
 
-@app.route("/admin/organization", methods=["GET","POST"])
+@app.route("/admin/organization", methods=["GET", "POST"])
 @admin_required
 def admin_organization():
     admin_id = session["admin_user_id"]
-    org_id = session["org_id"]
+    org_id = session.get("org_id")
 
     error = None
     success = None
@@ -1917,46 +1861,93 @@ def admin_organization():
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                if request.method == "POST":
-                    logo_url = (request.form.get("logo_url") or "").strip()
-                    primary_color = (request.form.get("primary_color") or "").strip()
-                    secondary_color = (request.form.get("secondary_color") or "").strip()
 
-                    if primary_color and not primary_color.startswith("#"):
-                        error = "Primary color must be hex like #111827"
-                    elif secondary_color and not secondary_color.startswith("#"):
-                        error = "Secondary color must be hex like #3b82f6"
-                    else:
-                        cur.execute("""
-                            UPDATE organizations
-                            SET logo_url = NULLIF(%s,''),
-                                primary_color = NULLIF(%s,''),
-                                secondary_color = NULLIF(%s,'')
-                            WHERE id = %s
-                        """, (logo_url, primary_color, secondary_color, org_id))
-
-                        log_admin_action(cur, admin_id, "ORG_BRANDING_UPDATE", metadata={
-                            "logo_url_set": bool(logo_url),
-                            "primary_color": primary_color or None,
-                            "secondary_color": secondary_color or None
-                        })
-                        success = "Branding updated."
-
+                # ✅ Always load current org branding data
+                # (Your existing helper should return logo_url, primary_color, secondary_color, name, etc.)
                 org = get_org_branding(cur, org_id)
+
+                # ✅ Always load join code (create if missing)
+                join_code = get_or_create_org_join_code(cur, org_id)
+
+                if request.method == "POST":
+                    action = (request.form.get("action") or "").strip()
+
+                    # ============================
+                    # A) UPDATE BRANDING
+                    # ============================
+                    if action == "save_branding":
+                        logo_url = (request.form.get("logo_url") or "").strip()
+                        primary_color = (request.form.get("primary_color") or "").strip()
+                        secondary_color = (request.form.get("secondary_color") or "").strip()
+
+                        if primary_color and not primary_color.startswith("#"):
+                            error = "Primary color must be hex like #111827"
+                        elif secondary_color and not secondary_color.startswith("#"):
+                            error = "Secondary color must be hex like #3b82f6"
+                        else:
+                            cur.execute("""
+                                UPDATE organizations
+                                SET logo_url = NULLIF(%s,''),
+                                    primary_color = NULLIF(%s,''),
+                                    secondary_color = NULLIF(%s,'')
+                                WHERE id = %s
+                            """, (logo_url, primary_color, secondary_color, org_id))
+
+                            log_admin_action(
+                                cur, admin_id, "ORG_BRANDING_UPDATE",
+                                metadata={
+                                    "logo_url_set": bool(logo_url),
+                                    "primary_color": primary_color or None,
+                                    "secondary_color": secondary_color or None
+                                }
+                            )
+                            success = "Branding updated."
+
+                            # reload org after update
+                            org = get_org_branding(cur, org_id)
+
+                    # ============================
+                    # B) REGENERATE JOIN CODE
+                    # ============================
+                    elif action == "regen_join_code":
+                        new_code = generate_join_code(6)
+                        # retry collisions
+                        for _ in range(6):
+                            try:
+                                cur.execute("""
+                                    INSERT INTO org_join_codes (org_id, code, created_at)
+                                    VALUES (%s, %s, now())
+                                    ON CONFLICT (org_id)
+                                    DO UPDATE SET code = EXCLUDED.code, created_at = now()
+                                """, (org_id, new_code))
+                                join_code = new_code
+                                success = "Join code regenerated."
+                                log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
+                                break
+                            except Exception:
+                                new_code = generate_join_code(6)
+                        else:
+                            error = "Failed to regenerate join code. Try again."
+
+                    else:
+                        error = "Unknown action."
 
         return render_template(
             "admin/organization.html",
             page_title="Organization",
-            subtitle="Branding settings",
+            subtitle="Branding & onboarding",
             last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
             active_page="organization",
+            admin_name=session.get("admin_name", "Admin"),
+
             error=error,
             success=success,
             org=org,
-            admin_name=session.get("admin_name","Admin")
+            join_code=join_code
         )
     finally:
         conn.close()
+
 
 
 # =========================================================
@@ -2348,6 +2339,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
