@@ -1,6 +1,26 @@
 {% extends "admin/base.html" %}
 {% block content %}
 
+<div class="card-soft p-3">
+  <div class="fw-bold mb-1">Join Code</div>
+  <div class="subtle mb-3">Students must send this in Messenger: <span class="fw-semibold">JOIN {{ join_code or "—" }}</span></div>
+
+  {% if join_code %}
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <div class="badge-soft b-gray">JOIN {{ join_code }}</div>
+      <div class="subtle">Share this to your students.</div>
+    </div>
+  {% else %}
+    <div class="subtle">No join code yet. Generate one below.</div>
+  {% endif %}
+
+  <form method="post" class="mt-3">
+    <button class="btn btn-dark btn-sm" type="submit">
+      Generate New Join Code
+    </button>
+  </form>
+</div>
+
 {% if error %}
   <div class="alert alert-danger">{{ error }}</div>
 {% endif %}
