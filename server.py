@@ -8,6 +8,8 @@ import requests
 import json
 import os
 import psycopg2
+import secrets
+import string
 from psycopg2.extras import RealDictCursor
 from flask import Response
 from flask import abort
@@ -45,8 +47,10 @@ VERIFY_TOKEN = "ojt_dtr_token"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 CRON_SECRET = os.environ.get("CRON_SECRET")
+DEFAULT_ORG_ID = int(os.environ.get("DEFAULT_ORG_ID", "0"))
 EXPORT_SECRET = os.environ.get("EXPORT_SECRET", "")
 app.secret_key = os.environ.get("SECRET_KEY", "dev-unsafe-change-me")
+
 
 
 PH_TZ = timezone(timedelta(hours=8))
@@ -173,6 +177,43 @@ def get_user_role(cur, sender_id: str):
         return None
     return row.get("role", "student")
 
+def normalize_join_code(s: str) -> str:
+    return (s or "").strip().upper()
+
+def get_org_context(cur, messenger_id: str):
+    cur.execute("""
+        SELECT organization_id
+        FROM messenger_org_context
+        WHERE messenger_id = %s
+    """, (messenger_id,))
+    row = cur.fetchone()
+    return row["organization_id"] if row else None
+
+def set_org_context(cur, messenger_id: str, org_id: int):
+    cur.execute("""
+        INSERT INTO messenger_org_context (messenger_id, organization_id, updated_at)
+        VALUES (%s, %s, now())
+        ON CONFLICT (messenger_id)
+        DO UPDATE SET organization_id = EXCLUDED.organization_id,
+                      updated_at = now()
+    """, (messenger_id, org_id))
+
+def clear_org_context(cur, messenger_id: str):
+    cur.execute("DELETE FROM messenger_org_context WHERE messenger_id=%s", (messenger_id,))
+
+def resolve_join_code(cur, code: str):
+    code = normalize_join_code(code)
+    cur.execute("""
+        SELECT jc.organization_id, o.name as org_name
+        FROM org_join_codes jc
+        JOIN organizations o ON o.id = jc.organization_id
+        WHERE jc.code = %s
+          AND jc.is_active = TRUE
+          AND (jc.expires_at IS NULL OR now() <= jc.expires_at)
+        LIMIT 1
+    """, (code,))
+    return cur.fetchone()  # None if invalid
+
 def get_admin_scope_by_messenger(cur, sender_id: str):
     """
     Returns (admin_user_id, org_id) for an admin messenger user.
@@ -262,9 +303,18 @@ def start_registration(cur, sender_id: str) -> str:
     existing = cur.fetchone()
     if existing:
         name = existing.get("full_name") or "(no name)"
+        return f"⚠️ You are already registered as: {name}"
+
+    # ✅ Require org context before registration
+    org_id = get_org_context(cur, sender_id)
+    if not org_id:
         return (
-            f"⚠️ You are already registered as: {name}\n"
-            f"If you need to update your details, contact your coordinator."
+            "🏫 Before you REGISTER, you must JOIN your school.\n\n"
+            "Reply like this:\n"
+            "JOIN <CODE>\n\n"
+            "Example:\n"
+            "JOIN ABC123\n\n"
+            "If you need help, contact your coordinator."
         )
 
     reg_set_session(cur, sender_id, "full_name", {})
@@ -368,10 +418,23 @@ def handle_registration(cur, sender_id: str, raw_text: str) -> str:
 
     if step == "confirm":
         if txt.upper() == "YES":
+            # ✅ Must have org context (from JOIN CODE)
+            org_id = get_org_context(cur, sender_id)
+            if not org_id:
+                reg_delete_session(cur, sender_id)
+                return (
+                    "⛔ Registration failed: No school linked.\n\n"
+                    "Please send:\n"
+                    "JOIN <CODE>\n\n"
+                    "Then send:\n"
+                    "REGISTER"
+                )
+
             cur.execute("""
                 INSERT INTO users
-                  (messenger_id, full_name, student_id, course, section, company_name, required_hours, start_date, end_date)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                  (messenger_id, full_name, student_id, course, section, company_name,
+                   required_hours, start_date, end_date, role, organization_id, completion_status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'student',%s,'IN_PROGRESS')
             """, (
                 sender_id,
                 data["full_name"],
@@ -381,21 +444,22 @@ def handle_registration(cur, sender_id: str, raw_text: str) -> str:
                 data["company_name"],
                 int(data["required_hours"]),
                 data["start_date"],
-                data["end_date"]
+                data["end_date"],
+                org_id
             ))
+    
             reg_delete_session(cur, sender_id)
+    
+            # optional: clear org context after successful registration
+            clear_org_context(cur, sender_id)
+    
             return "✅ Registration successful! Commands: TIME IN, TIME OUT, STATUS"
-
+    
         if txt.upper() == "NO":
             reg_delete_session(cur, sender_id)
             return "Okay. Reply REGISTER to start again."
-
+    
         return "Please reply YES to confirm or NO to restart."
-
-    # Fallback: reset session if unknown step
-    reg_delete_session(cur, sender_id)
-    return "⚠️ Registration session reset. Reply REGISTER to start again."
-
 
 # =========================================================
 # Log Admin Action
@@ -584,6 +648,23 @@ def webhook():
 
                     # If user not registered, guide them (discoverability)
                     if not is_registered(cur, sender_id):
+                     # ==========================
+                    # JOIN CODE (org binding)
+                    # ==========================
+                        if text.startswith("JOIN "):
+                            code = raw_text.split(" ", 1)[1].strip()
+                            found = resolve_join_code(cur, code)
+                            if not found:
+                                send_message(sender_id, "❌ Invalid join code. Please check with your coordinator.")
+                                return "ok", 200
+    
+                            set_org_context(cur, sender_id, int(found["organization_id"]))
+                            send_message(sender_id, f"✅ Joined: {found['org_name']}\nNow type: REGISTER")
+                            return "ok", 200
+    
+                        if text == "JOIN":
+                            send_message(sender_id, "Usage: JOIN <CODE>\nExample: JOIN ABC123")
+                            return "ok", 200
                         if text == "REGISTER":
                             send_message(sender_id, start_registration(cur, sender_id))
                             return "ok", 200
@@ -1609,6 +1690,68 @@ def admin_exports():
         admin_name=session.get("admin_name","Admin")
     )
 
+def generate_join_code(length=6):
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no confusing chars
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+@app.route("/admin/organization", methods=["GET", "POST"])
+@admin_required
+def admin_organization():
+    admin_id = session["admin_user_id"]
+    org_id = session.get("org_id")
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # org info
+                cur.execute("SELECT id, name FROM organizations WHERE id=%s", (org_id,))
+                org = cur.fetchone()
+
+                code = None
+
+                # get current active code
+                cur.execute("""
+                    SELECT code
+                    FROM org_join_codes
+                    WHERE organization_id=%s AND is_active=TRUE
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (org_id,))
+                row = cur.fetchone()
+                if row:
+                    code = row["code"]
+
+                if request.method == "POST":
+                    # deactivate old codes (one active code at a time)
+                    cur.execute("""
+                        UPDATE org_join_codes
+                        SET is_active=FALSE
+                        WHERE organization_id=%s AND is_active=TRUE
+                    """, (org_id,))
+
+                    new_code = generate_join_code(6)
+                    cur.execute("""
+                        INSERT INTO org_join_codes (organization_id, code, is_active, created_by_admin_user_id)
+                        VALUES (%s, %s, TRUE, %s)
+                    """, (org_id, new_code, admin_id))
+
+                    code = new_code
+                    log_admin_action(cur, admin_id, "PORTAL_JOIN_CODE_GENERATE", target=str(org_id))
+
+        return render_template(
+            "admin/organization.html",
+            page_title="Organization",
+            subtitle="Branding & onboarding",
+            last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
+            active_page="organization",
+            admin_name=session.get("admin_name","Admin"),
+            org=org,
+            join_code=code
+        )
+    finally:
+        conn.close()
+
 
 @app.route("/export/class")
 def export_class_csv():
@@ -2205,6 +2348,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
