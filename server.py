@@ -18,7 +18,7 @@ from datetime import datetime, timezone, timedelta, date
 from flask import session, redirect, url_for, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
-
+from psycopg2 import errors
 
 if __name__ == "__main__":
     app.run()
@@ -126,6 +126,10 @@ def make_export_token(payload: dict) -> str:
     body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     sig = hmac.new(EXPORT_SECRET.encode("utf-8"), body, hashlib.sha256).digest()
     return f"{_b64url_encode(body)}.{_b64url_encode(sig)}"
+
+def generate_join_code(length: int = 8) -> str:
+    alphabet = string.ascii_uppercase + string.digits  # A-Z + 0-9
+    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 def verify_export_token(token: str) -> dict | None:
     try:
@@ -1697,15 +1701,16 @@ def generate_join_code(length=6):
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 def get_or_create_org_join_code(cur, org_id: int) -> str:
-    # 1) Try existing
+    # 1) If already exists and has a code, return it
     cur.execute("SELECT code FROM org_join_codes WHERE organization_id=%s", (org_id,))
     row = cur.fetchone()
     if row and row.get("code"):
         return row["code"]
 
-    # 2) Create new (retry collisions)
-    code = generate_join_code(6)
-    for _ in range(8):
+    # 2) Generate and try until success
+    # 20 attempts is plenty with 8-char A-Z0-9
+    for _ in range(20):
+        code = generate_join_code(8)
         try:
             cur.execute("""
                 INSERT INTO org_join_codes (organization_id, code, created_at)
@@ -1714,8 +1719,9 @@ def get_or_create_org_join_code(cur, org_id: int) -> str:
                 DO UPDATE SET code = EXCLUDED.code, created_at = now()
             """, (org_id, code))
             return code
-        except Exception:
-            code = generate_join_code(6)
+        except errors.UniqueViolation:
+            # Code collision with UNIQUE(code) — try again
+            continue
 
     raise RuntimeError("Failed to generate join code (too many collisions)")
 
@@ -2363,6 +2369,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
