@@ -1691,9 +1691,31 @@ def admin_exports():
     )
 
 def generate_join_code(length=6):
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no confusing chars
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
+def get_or_create_org_join_code(cur, org_id: int) -> str:
+    # 1) Try existing
+    cur.execute("SELECT code FROM org_join_codes WHERE org_id=%s", (org_id,))
+    row = cur.fetchone()
+    if row and row.get("code"):
+        return row["code"]
+
+    # 2) Create new (retry collisions)
+    code = generate_join_code(6)
+    for _ in range(8):
+        try:
+            cur.execute("""
+                INSERT INTO org_join_codes (org_id, code, created_at)
+                VALUES (%s, %s, now())
+                ON CONFLICT (org_id)
+                DO UPDATE SET code = EXCLUDED.code, created_at = now()
+            """, (org_id, code))
+            return code
+        except Exception:
+            code = generate_join_code(6)
+
+    raise RuntimeError("Failed to generate join code (too many collisions)")
 
 
 
@@ -2339,6 +2361,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
