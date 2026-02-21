@@ -20,6 +20,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 
 
+if __name__ == "__main__":
+    app.run()
 
 app = Flask(__name__)
 @app.context_processor
@@ -2361,6 +2363,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
