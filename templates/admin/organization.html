@@ -1,66 +1,9 @@
 {% extends "admin/base.html" %}
 {% block content %}
 
-<div class="card-soft p-3">
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <div class="fw-bold">Join Code Management</div>
-
-    {% if days_remaining is not none %}
-      {% if days_remaining > 0 %}
-        <span class="badge bg-success">Active • {{ days_remaining }} days left</span>
-      {% else %}
-        <span class="badge bg-danger">Expired</span>
-      {% endif %}
-    {% endif %}
-  </div>
-
-  <div class="subtle mb-3">
-    Students must send this in Messenger:
-    <span class="fw-semibold">JOIN {{ join_code or "—" }}</span>
-  </div>
-
-  {% if join_code %}
-    <div class="row g-3 mb-3">
-      <div class="col-md-4">
-        <div class="border rounded p-2 text-center">
-          <div class="subtle small">Join Code</div>
-          <div class="fw-semibold">JOIN {{ join_code }}</div>
-        </div>
-      </div>
-
-      <div class="col-md-4">
-        <div class="border rounded p-2 text-center">
-          <div class="subtle small">Students Registered</div>
-          <div class="fw-semibold">{{ student_count }}</div>
-        </div>
-      </div>
-
-      <div class="col-md-4">
-        <div class="border rounded p-2 text-center">
-          <div class="subtle small">Expiration</div>
-          <div class="fw-semibold">
-            {% if days_remaining is not none %}
-              {{ days_remaining }} days
-            {% else %}
-              —
-            {% endif %}
-          </div>
-        </div>
-      </div>
-    </div>
-  {% else %}
-    <div class="subtle mb-3">No join code yet. Generate one below.</div>
-  {% endif %}
-
-  <form method="post">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="action" value="regen_join_code">
-    <button class="btn btn-dark btn-sm" type="submit">
-      Regenerate Join Code
-    </button>
-  </form>
-</div>
-
+{# ===============================
+   Alerts
+================================ #}
 {% if error %}
   <div class="alert alert-danger">{{ error }}</div>
 {% endif %}
@@ -68,14 +11,109 @@
   <div class="alert alert-success">{{ success }}</div>
 {% endif %}
 
+{# ===============================
+   JOIN CODE CARD
+================================ #}
+<div class="card-soft p-3 mb-3">
+  <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+    <div>
+      <div class="fw-bold mb-1">Join Code</div>
+      <div class="subtle">
+        Students must send this in Messenger:
+        <span class="fw-semibold">
+          JOIN {{ join_code_row.code if join_code_row else "—" }}
+        </span>
+      </div>
+      <div class="subtle mt-1">
+        Students in this organization: <span class="fw-semibold">{{ student_count }}</span>
+      </div>
+    </div>
+
+    {# Status badge #}
+    <div class="text-end">
+      {% if not join_code_row %}
+        <span class="badge bg-secondary">NO CODE</span>
+      {% else %}
+        {% set is_active = join_code_row.is_active %}
+        {% set expires_at = join_code_row.expires_at %}
+        {% if is_active and (days_remaining is none or days_remaining > 0) %}
+          <span class="badge bg-success">ACTIVE</span>
+        {% elif is_active and (days_remaining is not none and days_remaining == 0) %}
+          <span class="badge bg-danger">EXPIRED</span>
+        {% else %}
+          <span class="badge bg-warning text-dark">INACTIVE</span>
+        {% endif %}
+
+        <div class="subtle mt-1">
+          {% if days_remaining is none %}
+            Expires: <span class="fw-semibold">—</span>
+          {% else %}
+            Expires in:
+            <span class="fw-semibold">{{ days_remaining }}</span>
+            day{{ "s" if days_remaining != 1 else "" }}
+          {% endif %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <hr class="my-3">
+
+  {% if join_code_row %}
+    <div class="d-flex gap-2 flex-wrap align-items-center">
+      <div class="badge-soft b-gray">
+        JOIN {{ join_code_row.code }}
+      </div>
+      <div class="subtle">Share this code to your students.</div>
+    </div>
+  {% else %}
+    <div class="subtle">No join code yet. Generate one below.</div>
+  {% endif %}
+
+  <div class="d-flex gap-2 flex-wrap mt-3">
+    {# Generate new join code #}
+    <form method="post" class="d-inline">
+      <input type="hidden" name="action" value="regen_join_code">
+      <button class="btn btn-dark btn-sm" type="submit">
+        Regenerate Join Code
+      </button>
+    </form>
+
+    {# Deactivate #}
+    <form method="post" class="d-inline">
+      <input type="hidden" name="action" value="deactivate_join_code">
+      <button class="btn btn-outline-danger btn-sm" type="submit"
+              {% if not join_code_row or not join_code_row.is_active %}disabled{% endif %}>
+        Deactivate
+      </button>
+    </form>
+
+    {# Activate most recent #}
+    <form method="post" class="d-inline">
+      <input type="hidden" name="action" value="activate_join_code">
+      <button class="btn btn-outline-success btn-sm" type="submit"
+              {% if not join_code_row or join_code_row.is_active %}disabled{% endif %}>
+        Activate
+      </button>
+    </form>
+  </div>
+
+  <div class="subtle mt-2">
+    Tip: If you regenerate, old codes will be deactivated and a fresh code will be valid for 30 days.
+  </div>
+</div>
+
+
+{# ===============================
+   BRANDING CARD
+================================ #}
 <div class="card-soft p-3">
   <div class="mb-3">
     <div class="fw-semibold">Branding</div>
     <div class="subtle">Customize how this portal looks for your institution.</div>
   </div>
 
-  <form method="POST">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <form method="post">
     <div class="mb-3">
       <label class="form-label">Organization Name</label>
       <input class="form-control" value="{{ org.name }}" disabled>
@@ -83,20 +121,29 @@
 
     <div class="mb-3">
       <label class="form-label">Logo URL</label>
-      <input name="logo_url" class="form-control" value="{{ org.logo_url or '' }}" placeholder="https://.../logo.png">
-      <div class="subtle mt-1">MVP: paste a hosted logo URL (PNG/JPG/SVG). Upload support comes next.</div>
+      <input name="logo_url" class="form-control"
+             value="{{ org.logo_url or '' }}"
+             placeholder="https://.../logo.png">
+      <div class="subtle mt-1">
+        MVP: paste a hosted logo URL (PNG/JPG/SVG). Upload support comes next.
+      </div>
     </div>
 
     <div class="row g-3">
       <div class="col-md-6">
         <label class="form-label">Primary Color</label>
-        <input name="primary_color" class="form-control" value="{{ org.primary_color or '' }}" placeholder="#111827">
+        <input name="primary_color" class="form-control"
+               value="{{ org.primary_color or '' }}"
+               placeholder="#111827">
       </div>
       <div class="col-md-6">
         <label class="form-label">Secondary Color</label>
-        <input name="secondary_color" class="form-control" value="{{ org.secondary_color or '' }}" placeholder="#3b82f6">
+        <input name="secondary_color" class="form-control"
+               value="{{ org.secondary_color or '' }}"
+               placeholder="#3b82f6">
       </div>
     </div>
+
     <input type="hidden" name="action" value="save_branding">
     <button class="btn btn-primary mt-3" type="submit">Save Branding</button>
   </form>
