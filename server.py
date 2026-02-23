@@ -1440,14 +1440,17 @@ def admin_login():
                 # ✅ Check lock
                 attempt = login_attempt_get(cur, email)
                 now_utc = datetime.now(timezone.utc)
-    
+                
                 if attempt and attempt.get("locked_until"):
                     locked_until = as_aware_utc(attempt["locked_until"])
                     if locked_until and now_utc < locked_until:
-                        mins = int((locked_until - now_utc).total_seconds() // 60) + 1
+                        remaining = int((locked_until - now_utc).total_seconds())
+                        mins = remaining // 60
+                        secs = remaining % 60
+                
                         return render_template(
                             "admin/login.html",
-                            error=f"Too many failed attempts. Try again in about {mins} minute(s)."
+                            error=f"Too many failed attempts. Please try again in {mins}m {secs}s."
                         )
     
                 # ✅ Look up admin account
@@ -2680,6 +2683,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
