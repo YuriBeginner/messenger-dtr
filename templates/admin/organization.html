@@ -73,6 +73,7 @@
   <div class="d-flex gap-2 flex-wrap mt-3">
     {# Generate new join code #}
     <form method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="action" value="regen_join_code">
       <button class="btn btn-dark btn-sm" type="submit">
         Regenerate Join Code
@@ -81,6 +82,7 @@
 
     {# Deactivate #}
     <form method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="action" value="deactivate_join_code">
       <button class="btn btn-outline-danger btn-sm" type="submit"
               {% if not join_code_row or not join_code_row.is_active %}disabled{% endif %}>
@@ -90,6 +92,7 @@
 
     {# Activate most recent #}
     <form method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="action" value="activate_join_code">
       <button class="btn btn-outline-success btn-sm" type="submit"
               {% if not join_code_row or join_code_row.is_active %}disabled{% endif %}>
