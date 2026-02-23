@@ -1992,35 +1992,18 @@ def admin_exports():
         admin_name=session.get("admin_name","Admin")
     )
 
-JOIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no O/0, no I/1
 
-def generate_join_code(length: int = 8) -> str:
-    return "".join(secrets.choice(JOIN_CODE_ALPHABET) for _ in range(length))
+def generate_join_code(n: int = 8) -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(n))
 
-
-from psycopg2 import errors as pg_errors
-
-def _org_join_codes_has_created_by_admin_id(cur) -> bool:
-    # checks once per call; you can cache if you want
-    cur.execute("""
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'org_join_codes'
-          AND column_name = 'created_by_admin_id'
-        LIMIT 1
-    """)
-    return cur.fetchone() is not None
-
-
-def get_or_create_org_join_code(cur, org_id: int, admin_id: int = None) -> dict:
+def get_or_create_org_join_code(cur, org_id: int, admin_id: int) -> dict:
     """
-    Returns a join code ROW dict:
+    Always returns a ROW dict:
     {id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id}
-    Always returns a row (never a plain string).
     """
 
-    # 1) Existing active + not expired
+    # 1) Return active + not expired if available
     cur.execute("""
         SELECT id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
         FROM org_join_codes
@@ -2034,18 +2017,10 @@ def get_or_create_org_join_code(cur, org_id: int, admin_id: int = None) -> dict:
     if row:
         return row
 
-    # 2) Deactivate old codes (ok even if none)
-    cur.execute("""
-        UPDATE org_join_codes
-        SET is_active = FALSE
-        WHERE organization_id = %s
-    """, (org_id,))
-
-    # 3) Create new code with SAVEPOINT retry
-    for _ in range(20):
+    # 2) Otherwise generate with UPSERT (one row per org)
+    for _ in range(50):
         code = generate_join_code(8)
 
-        # IMPORTANT: savepoint allows retry without killing the whole transaction
         cur.execute("SAVEPOINT sp_join_code;")
         try:
             cur.execute("""
@@ -2053,25 +2028,32 @@ def get_or_create_org_join_code(cur, org_id: int, admin_id: int = None) -> dict:
                     (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
                 VALUES
                     (%s, %s, TRUE, now() + interval '30 days', %s, now())
+                ON CONFLICT (organization_id)
+                DO UPDATE SET
+                    code = EXCLUDED.code,
+                    is_active = TRUE,
+                    expires_at = EXCLUDED.expires_at,
+                    created_by_admin_id = EXCLUDED.created_by_admin_id,
+                    created_at = now()
                 RETURNING id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
             """, (org_id, code, admin_id))
+
             row = cur.fetchone()
             cur.execute("RELEASE SAVEPOINT sp_join_code;")
             return row
 
-        except psycopg2.Error as e:
-            # rollback just this attempt
+        except errors.UniqueViolation:
+            # likely UNIQUE(code) collision
             cur.execute("ROLLBACK TO SAVEPOINT sp_join_code;")
             cur.execute("RELEASE SAVEPOINT sp_join_code;")
+            continue
 
-            # retry ONLY if it's a duplicate code collision
-            if isinstance(e, errors.UniqueViolation):
-                continue
-
-            # any other DB error should NOT be swallowed
+        except Exception:
+            cur.execute("ROLLBACK TO SAVEPOINT sp_join_code;")
+            cur.execute("RELEASE SAVEPOINT sp_join_code;")
             raise
 
-    raise RuntimeError("Failed to generate join code after 20 attempts")
+    raise RuntimeError("Failed to generate join code after 50 attempts.")
 
 
 @app.route("/export/class")
@@ -2272,18 +2254,21 @@ def admin_organization():
                                     success = "Branding updated."
                     
                             elif action == "regen_join_code":
-                                # deactivate all old codes
+                                join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
+                                # force refresh by regenerating again via UPSERT
+                                # easiest: call helper but ensure it doesn't return existing active:
+                                # so temporarily deactivate first:
                                 cur.execute("""
                                     UPDATE org_join_codes
                                     SET is_active = FALSE
                                     WHERE organization_id = %s
                                 """, (org_id,))
                             
-                                # create a brand new one safely (returns a row)
                                 join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
+                                join_code = join_code_row["code"]
                             
                                 log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
-                                success = f"Join code regenerated: {join_code_row['code']}"
+                                success = "Join code regenerated."
                     
                                 # Insert new (retry collisions)
                                 inserted = False
