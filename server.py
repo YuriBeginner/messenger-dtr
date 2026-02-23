@@ -2167,41 +2167,22 @@ def admin_organization():
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
 
-                # ✅ Always load current org branding data
-                # (Your existing helper should return logo_url, primary_color, secondary_color, name, etc.)
+                # ============================
+                # LOAD BASE DATA
+                # ============================
                 org = get_org_branding(cur, org_id)
+                join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
 
-                # ✅ Always load join code (create if missing)
-                join_code = get_or_create_org_join_code(cur, org_id, admin_id)
-
-                # ✅ Count total students in this organization
-                cur.execute("""
-                    SELECT COUNT(*) AS c
-                    FROM users
-                    WHERE organization_id = %s
-                      AND COALESCE(role,'student')='student'
-                """, (org_id,))
-                student_count = int(cur.fetchone()["c"] or 0)
-                
-                # ✅ Calculate join code expiration remaining days
-                from datetime import timezone
-                
-                expires_at = join_code.get("expires_at")
-                days_remaining = None
-                
-                if expires_at:
-                    now = datetime.now(timezone.utc)
-                    expires_at_utc = as_aware_utc(expires_at)
-                    delta = expires_at_utc - now
-                    days_remaining = max(delta.days, 0)
-
+                # ============================
+                # HANDLE POST ACTIONS
+                # ============================
                 if request.method == "POST":
-                    csrf_validate_or_abort()  # ✅ CSRF protection
+                    csrf_validate_or_abort()
                     action = (request.form.get("action") or "").strip()
 
-                    # ============================
+                    # ----------------------------
                     # A) UPDATE BRANDING
-                    # ============================
+                    # ----------------------------
                     if action == "save_branding":
                         logo_url = (request.form.get("logo_url") or "").strip()
                         primary_color = (request.form.get("primary_color") or "").strip()
@@ -2221,46 +2202,61 @@ def admin_organization():
                             """, (logo_url, primary_color, secondary_color, org_id))
 
                             log_admin_action(
-                                cur, admin_id, "ORG_BRANDING_UPDATE",
+                                cur,
+                                admin_id,
+                                "ORG_BRANDING_UPDATE",
                                 metadata={
                                     "logo_url_set": bool(logo_url),
                                     "primary_color": primary_color or None,
                                     "secondary_color": secondary_color or None
                                 }
                             )
-                            success = "Branding updated."
 
-                            # reload org after update
+                            success = "Branding updated."
                             org = get_org_branding(cur, org_id)
 
-                    # ============================
+                    # ----------------------------
                     # B) REGENERATE JOIN CODE
-                    # ============================
+                    # ----------------------------
                     elif action == "regen_join_code":
-                        # 1) deactivate all old codes
+
+                        # deactivate all existing codes
                         cur.execute("""
                             UPDATE org_join_codes
                             SET is_active = FALSE
                             WHERE organization_id = %s
                         """, (org_id,))
-                    
-                        # 2) insert new unique code (retry collisions)
+
+                        # insert new code (retry on collision)
                         for _ in range(20):
                             code = generate_join_code(8)
                             try:
                                 cur.execute("""
                                     INSERT INTO org_join_codes
-                                    (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
-                                    VALUES (%s, %s, TRUE, now() + interval '30 days', %s, now())
+                                    (organization_id, code, is_active, expires_at,
+                                     created_by_admin_id, created_at)
+                                    VALUES (%s, %s, TRUE,
+                                            now() + interval '30 days',
+                                            %s, now())
                                 """, (org_id, code, admin_id))
+
+                                log_admin_action(
+                                    cur,
+                                    admin_id,
+                                    "ORG_JOIN_CODE_REGENERATE",
+                                    metadata={"new_code": code}
+                                )
+
                                 success = "Join code regenerated."
-                                log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
                                 break
                             except Exception:
                                 continue
                         else:
                             error = "Failed to regenerate join code. Try again."
 
+                    # ----------------------------
+                    # C) DEACTIVATE JOIN CODE
+                    # ----------------------------
                     elif action == "deactivate_join_code":
                         cur.execute("""
                             UPDATE org_join_codes
@@ -2268,19 +2264,67 @@ def admin_organization():
                             WHERE organization_id = %s
                               AND is_active = TRUE
                         """, (org_id,))
-                        log_admin_action(cur, admin_user_id, "JOIN_CODE_DEACTIVATED")
+
+                        log_admin_action(
+                            cur,
+                            admin_id,
+                            "JOIN_CODE_DEACTIVATED"
+                        )
+
                         success = "Join code deactivated."
-                    
+
+                    # ----------------------------
+                    # D) ACTIVATE LATEST JOIN CODE
+                    # ----------------------------
                     elif action == "activate_join_code":
                         cur.execute("""
+                            WITH latest AS (
+                                SELECT id
+                                FROM org_join_codes
+                                WHERE organization_id = %s
+                                ORDER BY created_at DESC
+                                LIMIT 1
+                            )
                             UPDATE org_join_codes
                             SET is_active = TRUE
-                            WHERE organization_id = %s
-                            ORDER BY created_at DESC
-                            LIMIT 1
+                            WHERE id IN (SELECT id FROM latest)
                         """, (org_id,))
-                        log_admin_action(cur, admin_user_id, "JOIN_CODE_ACTIVATED")
+
+                        log_admin_action(
+                            cur,
+                            admin_id,
+                            "JOIN_CODE_ACTIVATED"
+                        )
+
                         success = "Join code activated."
+
+                    else:
+                        error = "Unknown action."
+
+                    # reload join code after any POST action
+                    join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
+
+                # ============================
+                # RECALCULATE JOIN CODE INFO
+                # ============================
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM users
+                    WHERE organization_id = %s
+                      AND COALESCE(role,'student')='student'
+                """, (org_id,))
+                student_count = int(cur.fetchone()["c"] or 0)
+
+                from datetime import timezone
+
+                expires_at = join_code_row.get("expires_at")
+                days_remaining = None
+
+                if expires_at:
+                    now = datetime.now(timezone.utc)
+                    expires_at_utc = as_aware_utc(expires_at)
+                    delta = expires_at_utc - now
+                    days_remaining = max(delta.days, 0)
 
         return render_template(
             "admin/organization.html",
@@ -2289,17 +2333,16 @@ def admin_organization():
             last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
             active_page="organization",
             admin_name=session.get("admin_name", "Admin"),
-
             error=error,
             success=success,
             org=org,
-            join_code=join_code,
+            join_code=join_code_row.get("code") if join_code_row else None,
             student_count=student_count,
             days_remaining=days_remaining
         )
+
     finally:
         conn.close()
-
 
 
 # =========================================================
@@ -2770,6 +2813,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
