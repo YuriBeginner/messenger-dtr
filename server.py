@@ -2216,203 +2216,233 @@ def admin_organization():
     error = None
     success = None
 
+    # Defensive: org_id must exist
+    if not org_id:
+        return render_template(
+            "admin/organization.html",
+            page_title="Organization",
+            subtitle="Branding & onboarding",
+            last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
+            active_page="organization",
+            admin_name=session.get("admin_name", "Admin"),
+            error="Missing organization context. Please log in again.",
+            success=None,
+            org={"name": "", "logo_url": None, "primary_color": None, "secondary_color": None},
+            join_code_row=None,
+            join_code=None,
+            join_is_active=False,
+            student_count=0,
+            days_remaining=None,
+        ), 400
+
     conn = get_db_connection()
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # ----------------------------
+                # Load data for GET (and initial state for POST)
+                # ----------------------------
+                org = get_org_branding(cur, org_id)
 
-                try:
-                    # --- Always load org + join code BEFORE POST so GET works even if POST fails ---
-                    org = get_org_branding(cur, org_id)
-                    join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
-                    
-                    if request.method == "POST":
-                        try:
-                            csrf_validate_or_abort()
-                    
-                            action = (request.form.get("action") or "").strip()
-                            if not action:
-                                error = "Missing action."
-                            elif action == "save_branding":
-                                logo_url = (request.form.get("logo_url") or "").strip()
-                                primary_color = (request.form.get("primary_color") or "").strip()
-                                secondary_color = (request.form.get("secondary_color") or "").strip()
-                    
-                                if primary_color and not primary_color.startswith("#"):
-                                    error = "Primary color must be hex like #111827"
-                                elif secondary_color and not secondary_color.startswith("#"):
-                                    error = "Secondary color must be hex like #3b82f6"
-                                else:
-                                    cur.execute("""
-                                        UPDATE organizations
-                                        SET logo_url = NULLIF(%s,''),
-                                            primary_color = NULLIF(%s,''),
-                                            secondary_color = NULLIF(%s,'')
-                                        WHERE id = %s
-                                    """, (logo_url, primary_color, secondary_color, org_id))
-                                    log_admin_action(cur, admin_id, "ORG_BRANDING_UPDATE")
-                                    success = "Branding updated."
-                    
-                            elif action == "regen_join_code":
-                                join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
-                                # force refresh by regenerating again via UPSERT
-                                # easiest: call helper but ensure it doesn't return existing active:
-                                # so temporarily deactivate first:
-                                cur.execute("""
-                                    UPDATE org_join_codes
-                                    SET is_active = FALSE
-                                    WHERE organization_id = %s
-                                """, (org_id,))
-                            
-                                join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
-                                join_code = join_code_row["code"]
-                            
-                                log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
-                                success = "Join code regenerated."
-                    
-                                # Insert new (retry collisions)
-                                inserted = False
-                                for _ in range(20):
-                                    code = generate_join_code(8)
-                                    try:
-                                        cur.execute("""
-                                            INSERT INTO org_join_codes
-                                            (organization_id, code, is_active, expires_at, created_at)
-                                            VALUES (%s, %s, TRUE, now() + interval '30 days', now())
-                                        """, (org_id, code))
-                                        log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
-                                        success = "Join code regenerated."
-                                        inserted = True
-                                        break
-                                    except PGError:
-                                        # collision or constraint issue -> retry
-                                        conn.rollback()
-                                        # reopen cursor transaction state by continuing (Flask will reuse same cursor object)
-                                        continue
-                    
-                                if not inserted and not error:
-                                    error = "Failed to regenerate join code. Try again."
-                    
-                            elif action == "deactivate_join_code":
-                                cur.execute("""
-                                    UPDATE org_join_codes
-                                    SET is_active = FALSE
-                                    WHERE organization_id = %s
-                                      AND is_active = TRUE
-                                """, (org_id,))
-                                log_admin_action(cur, admin_id, "JOIN_CODE_DEACTIVATED")
-                                success = "Join code deactivated."
-                    
-                            elif action == "activate_join_code":
-                                cur.execute("""
-                                    WITH latest AS (
-                                        SELECT id
-                                        FROM org_join_codes
-                                        WHERE organization_id = %s
-                                        ORDER BY id DESC
-                                        LIMIT 1
-                                    )
-                                    UPDATE org_join_codes
-                                    SET is_active = TRUE
-                                    WHERE id IN (SELECT id FROM latest)
-                                """, (org_id,))
-                                log_admin_action(cur, admin_id, "JOIN_CODE_ACTIVATED")
-                                success = "Join code activated."
-                    
+                # For safety: do NOT create a code just by viewing the page
+                # (If you want auto-create on GET, switch this to get_or_create_org_join_code)
+                join_code_row = get_current_org_join_code(cur, org_id)  # <-- you must have this helper (see below)
+                # If you don't have it, use the fallback helper provided at the bottom.
+
+                # ----------------------------
+                # Handle POST actions
+                # ----------------------------
+                if request.method == "POST":
+                    csrf_validate_or_abort()
+                    action = (request.form.get("action") or "").strip()
+
+                    try:
+                        if action == "save_branding":
+                            logo_url = (request.form.get("logo_url") or "").strip()
+                            primary_color = (request.form.get("primary_color") or "").strip()
+                            secondary_color = (request.form.get("secondary_color") or "").strip()
+
+                            if primary_color and not primary_color.startswith("#"):
+                                error = "Primary color must be hex like #111827"
+                            elif secondary_color and not secondary_color.startswith("#"):
+                                error = "Secondary color must be hex like #3b82f6"
                             else:
-                                error = "Unknown action."
-                    
-                            # ✅ IMPORTANT: reload after POST (still inside the same cursor/transaction)
-                            org = get_org_branding(cur, org_id)
-                            join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
-                    
-                        except PGError as e:
-                            # ✅ DB errors must rollback or your transaction stays aborted
-                            conn.rollback()
-                            print("ADMIN_ORG_DB_ERROR:", repr(e))
-                            error = "Database error. Please try again."
-                    
-                            # ✅ After rollback, reload using a NEW cursor in a clean transaction
-                            with conn.cursor(cursor_factory=RealDictCursor) as cur2:
-                                org = get_org_branding(cur2, org_id)
-                                join_code_row = get_or_create_org_join_code(cur2, org_id, admin_id)
-                    
-                        except Exception as e:
-                            # ✅ Non-DB errors also rollback for safety
-                            conn.rollback()
-                            print("ADMIN_ORG_FATAL:", repr(e))
-                            error = "Request failed. Please try again."
-                    
-                            # ✅ Reload safely using a NEW cursor
-                            with conn.cursor(cursor_factory=RealDictCursor) as cur2:
-                                org = get_org_branding(cur2, org_id)
-                                join_code_row = get_or_create_org_join_code(cur2, org_id, admin_id)
+                                cur.execute(
+                                    """
+                                    UPDATE organizations
+                                    SET logo_url = NULLIF(%s,''),
+                                        primary_color = NULLIF(%s,''),
+                                        secondary_color = NULLIF(%s,'')
+                                    WHERE id = %s
+                                    """,
+                                    (logo_url, primary_color, secondary_color, org_id),
+                                )
+                                log_admin_action(cur, admin_id, "ORG_BRANDING_UPDATE")
+                                success = "Branding updated."
+                                error = None
 
-                    # --- Student count ---
-                    cur.execute("""
-                        SELECT COUNT(*) AS c
-                        FROM users
-                        WHERE organization_id = %s
-                          AND COALESCE(role,'student')='student'
-                    """, (org_id,))
-                    student_count = int(cur.fetchone()["c"] or 0)
-                    
-                    # --- Join code row (dict) ---
-                    join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
-                    
-                    # --- Expiration ---
-                    from datetime import timezone
-                    
-                    expires_at = join_code_row.get("expires_at") if join_code_row else None
-                    days_remaining = None
-                    if expires_at:
-                        now = datetime.now(timezone.utc)
-                        expires_at_utc = as_aware_utc(expires_at)
-                        delta = expires_at_utc - now
-                        days_remaining = max(delta.days, 0)
-                    
-                    # --- Join code string (THIS is what template should use) ---
-                    join_code = join_code_row.get("code") if join_code_row else None
-                    
-                    return render_template(
-                        "admin/organization.html",
-                        page_title="Organization",
-                        subtitle="Branding & onboarding",
-                        last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
-                        active_page="organization",
-                        admin_name=session.get("admin_name", "Admin"),
-                        error=error,
-                        success=success,
-                        org=org,
-                        join_code=join_code,              # STRING
-                        student_count=student_count,
-                        days_remaining=days_remaining
-                    )
+                        elif action == "regen_join_code":
+                            # Deactivate all existing codes for this org
+                            cur.execute(
+                                """
+                                UPDATE org_join_codes
+                                SET is_active = FALSE
+                                WHERE organization_id = %s
+                                """,
+                                (org_id,),
+                            )
 
-                except Exception as e:
-                    # ✅ This catches EVERYTHING in this route
-                    conn.rollback()
-                    print("ADMIN_ORG_FATAL:", repr(e))
-                    error = f"Database error: {str(e)}"
+                            # Insert a fresh code (retry collisions)
+                            inserted = False
+                            last_exc = None
+                            for _ in range(20):
+                                code = generate_join_code(8)
+                                try:
+                                    # NOTE: include created_by_admin_id if your table has it
+                                    cur.execute(
+                                        """
+                                        INSERT INTO org_join_codes
+                                            (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
+                                        VALUES
+                                            (%s, %s, TRUE, now() + interval '30 days', %s, now())
+                                        """,
+                                        (org_id, code, admin_id),
+                                    )
+                                    inserted = True
+                                    break
+                                except Exception as e:
+                                    last_exc = e
+                                    # stay in same transaction; just try a new code
+                                    continue
 
-                    # render safe fallback
-                    return render_template(
-                        "admin/organization.html",
-                        page_title="Organization",
-                        subtitle="Branding & onboarding",
-                        last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
-                        active_page="organization",
-                        admin_name=session.get("admin_name", "Admin"),
-                        error=error,
-                        success=None,
-                        org=get_org_branding(cur, org_id),
-                        join_code=None,
-                        student_count=0,
-                        days_remaining=None
-                    )
+                            if not inserted:
+                                raise RuntimeError(f"Failed to generate join code after 20 attempts: {last_exc!r}")
+
+                            log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
+                            success = "Join code regenerated."
+                            error = None
+
+                        elif action == "deactivate_join_code":
+                            cur.execute(
+                                """
+                                UPDATE org_join_codes
+                                SET is_active = FALSE
+                                WHERE organization_id = %s
+                                  AND is_active = TRUE
+                                """,
+                                (org_id,),
+                            )
+                            log_admin_action(cur, admin_id, "JOIN_CODE_DEACTIVATED")
+                            success = "Join code deactivated."
+                            error = None
+
+                        elif action == "activate_join_code":
+                            # Activate the most recent code AND deactivate others (prevents weird states)
+                            cur.execute(
+                                """
+                                WITH latest AS (
+                                    SELECT id
+                                    FROM org_join_codes
+                                    WHERE organization_id = %s
+                                    ORDER BY created_at DESC, id DESC
+                                    LIMIT 1
+                                )
+                                UPDATE org_join_codes
+                                SET is_active = (id IN (SELECT id FROM latest))
+                                WHERE organization_id = %s
+                                """,
+                                (org_id, org_id),
+                            )
+                            log_admin_action(cur, admin_id, "JOIN_CODE_ACTIVATED")
+                            success = "Join code activated."
+                            error = None
+
+                        else:
+                            error = "Unknown action."
+                            success = None
+
+                    except Exception as e:
+                        # IMPORTANT: rollback so you don't get "transaction is aborted"
+                        conn.rollback()
+                        print("ADMIN_ORG_ACTION_ERROR:", repr(e))
+                        error = f"Database error: {str(e)}"
+                        success = None
+
+                # ----------------------------
+                # Reload AFTER POST (so UI reflects DB)
+                # ----------------------------
+                org = get_org_branding(cur, org_id)
+
+                # If there are no codes, create one only when needed:
+                # - If you want a code always present, switch to get_or_create_org_join_code here.
+                join_code_row = get_current_org_join_code(cur, org_id)
+                # If you want auto-create uncomment this instead:
+                # join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
+
+                # Student count
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS c
+                    FROM users
+                    WHERE organization_id = %s
+                      AND COALESCE(role,'student')='student'
+                    """,
+                    (org_id,),
+                )
+                student_count = int(cur.fetchone()["c"] or 0)
+
+                # Expiration days remaining
+                from datetime import timezone
+
+                expires_at = join_code_row.get("expires_at") if join_code_row else None
+                days_remaining = None
+                if expires_at:
+                    now = datetime.now(timezone.utc)
+                    expires_at_utc = as_aware_utc(expires_at)
+                    delta = expires_at_utc - now
+                    days_remaining = max(delta.days, 0)
+
+                join_code = join_code_row.get("code") if join_code_row else None
+                join_is_active = bool(join_code_row.get("is_active")) if join_code_row else False
+
+                return render_template(
+                    "admin/organization.html",
+                    page_title="Organization",
+                    subtitle="Branding & onboarding",
+                    last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
+                    active_page="organization",
+                    admin_name=session.get("admin_name", "Admin"),
+                    error=error,
+                    success=success,
+                    org=org,
+                    join_code_row=join_code_row,   # ✅ pass row for your template
+                    join_code=join_code,           # ✅ also pass string if you want
+                    join_is_active=join_is_active, # ✅ for button disable logic
+                    student_count=student_count,
+                    days_remaining=days_remaining,
+                )
 
     finally:
         conn.close()
+
+
+# ----------------------------
+# Helper you likely need:
+# (Use this if you don't already have it)
+# It DOES NOT create new codes; it just returns latest row for UI.
+# ----------------------------
+def get_current_org_join_code(cur, org_id: int) -> dict | None:
+    cur.execute(
+        """
+        SELECT id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
+        FROM org_join_codes
+        WHERE organization_id = %s
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (org_id,),
+    )
+    return cur.fetchone()
 
 
 # =========================================================
@@ -2883,6 +2913,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
