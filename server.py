@@ -1960,46 +1960,38 @@ def generate_join_code(length: int = 8) -> str:
     return "".join(secrets.choice(JOIN_CODE_ALPHABET) for _ in range(length))
 
 
-def get_or_create_org_join_code(cur, org_id: int, admin_id: int = None) -> str:
-    # 1️⃣ Check for existing ACTIVE + NOT expired code
+def get_or_create_org_join_code(cur, org_id: int, admin_id: int):
+    # try to get active code
     cur.execute("""
-        SELECT code
+        SELECT *
         FROM org_join_codes
         WHERE organization_id = %s
-          AND is_active = true
-          AND (expires_at IS NULL OR expires_at > now())
+        ORDER BY created_at DESC
         LIMIT 1
     """, (org_id,))
-    
     row = cur.fetchone()
-    if row and row.get("code"):
-        return row["code"]
 
-    # 2️⃣ Deactivate any old codes
-    cur.execute("""
-        UPDATE org_join_codes
-        SET is_active = false
-        WHERE organization_id = %s
-    """, (org_id,))
+    if row:
+        return row
 
-    # 3️⃣ Generate new code safely
+    # create if none exists
     for _ in range(20):
         code = generate_join_code(8)
-
         try:
             cur.execute("""
                 INSERT INTO org_join_codes
-                (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
-                VALUES (%s, %s, true, now() + interval '30 days', %s, now())
+                (organization_id, code, is_active, expires_at,
+                 created_by_admin_id, created_at)
+                VALUES (%s, %s, TRUE,
+                        now() + interval '30 days',
+                        %s, now())
+                RETURNING *
             """, (org_id, code, admin_id))
-            
-            return code
-
+            return cur.fetchone()
         except Exception:
-            # likely UNIQUE(code) collision
             continue
 
-    raise RuntimeError("Failed to generate join code (too many collisions)")
+    raise RuntimeError("Failed to create join code")
 
 
 @app.route("/export/class")
@@ -2813,6 +2805,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
