@@ -11,6 +11,7 @@ import psycopg2
 import secrets
 import string
 from psycopg2.extras import RealDictCursor
+from psycopg2 import errors
 from flask import Response
 from flask import abort
 from flask import Flask, request, render_template
@@ -18,12 +19,12 @@ from datetime import datetime, timezone, timedelta, date
 from flask import session, redirect, url_for, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
-from psycopg2 import errors
+
+
+app = Flask(__name__)
 
 if __name__ == "__main__":
     app.run()
-
-app = Flask(__name__)
 @app.context_processor
 def inject_org_branding():
     org_id = session.get("org_id")
@@ -44,6 +45,10 @@ def inject_org_branding():
         except Exception:
             pass
 
+@app.context_processor
+def inject_csrf_token():
+    return {"csrf_token": csrf_get_token()}
+
 
 VERIFY_TOKEN = "ojt_dtr_token"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
@@ -51,8 +56,16 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 CRON_SECRET = os.environ.get("CRON_SECRET")
 DEFAULT_ORG_ID = int(os.environ.get("DEFAULT_ORG_ID", "0"))
 EXPORT_SECRET = os.environ.get("EXPORT_SECRET", "")
-app.secret_key = os.environ.get("SECRET_KEY", "dev-unsafe-change-me")
-
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY environment variable is required")
+app.secret_key = SECRET_KEY
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=True,   # must be HTTPS in production
+)
+app.permanent_session_lifetime = timedelta(hours=8)
 
 
 PH_TZ = timezone(timedelta(hours=8))
@@ -127,10 +140,6 @@ def make_export_token(payload: dict) -> str:
     sig = hmac.new(EXPORT_SECRET.encode("utf-8"), body, hashlib.sha256).digest()
     return f"{_b64url_encode(body)}.{_b64url_encode(sig)}"
 
-def generate_join_code(length: int = 8) -> str:
-    alphabet = string.ascii_uppercase + string.digits  # A-Z + 0-9
-    return "".join(secrets.choice(alphabet) for _ in range(length))
-
 def verify_export_token(token: str) -> dict | None:
     try:
         if not EXPORT_SECRET:
@@ -162,6 +171,29 @@ def get_org_branding(cur, org_id: int):
         LIMIT 1
     """, (org_id,))
     return cur.fetchone()
+
+# =========================================================
+# CSRF Helper function
+# =========================================================
+
+def csrf_get_token() -> str:
+    """
+    Returns a CSRF token stored in session. Creates one if missing.
+    """
+    tok = session.get("csrf_token")
+    if not tok:
+        tok = secrets.token_urlsafe(32)
+        session["csrf_token"] = tok
+    return tok
+
+def csrf_validate_or_abort():
+    """
+    Validates CSRF token from POST form.
+    """
+    form_tok = (request.form.get("csrf_token") or "").strip()
+    sess_tok = (session.get("csrf_token") or "").strip()
+    if not form_tok or not sess_tok or not hmac.compare_digest(form_tok, sess_tok):
+        abort(400)
 
 
 
@@ -713,7 +745,12 @@ def webhook():
 
                         # ADMIN SUMMARY
                         if cmd == "ADMIN SUMMARY":
-                            send_message(sender_id, handle_admin_summary(cur, today_ph))
+                            admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
+                            if not admin_user_id or not org_id:
+                                send_message(sender_id, "⛔ Admin access required.")
+                                return "ok", 200
+                        
+                            send_message(sender_id, handle_admin_summary(cur, today_ph, org_id))
                             return "ok", 200
 
                         # ADMIN MISSING TODAY [course] [section]
@@ -738,8 +775,16 @@ def webhook():
                                     "ADMIN MISSING TODAY BSECE 4B"
                                 ))
                                 return "ok", 200
-
-                            send_message(sender_id, handle_admin_missing_today(cur, today_ph, course=course, section=section))
+                        
+                            admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
+                            if not admin_user_id or not org_id:
+                                send_message(sender_id, "⛔ Admin access required.")
+                                return "ok", 200
+                        
+                            send_message(
+                                sender_id,
+                                handle_admin_missing_today(cur, today_ph, org_id, course=course, section=section)
+                            )
                             return "ok", 200
 
                         # ADMIN RISK <course> <section>
@@ -747,9 +792,15 @@ def webhook():
                             if len(parts) != 4:
                                 send_message(sender_id, usage("ADMIN RISK", "ADMIN RISK <course> <section>", "ADMIN RISK BSECE 4B"))
                                 return "ok", 200
+                        
+                            admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
+                            if not admin_user_id or not org_id:
+                                send_message(sender_id, "⛔ Admin access required.")
+                                return "ok", 200
+                        
                             course = parts[2].upper()
                             section = parts[3].upper()
-                            send_message(sender_id, handle_admin_risk(cur, today_ph, course, section))
+                            send_message(sender_id, handle_admin_risk(cur, today_ph, org_id, course, section))
                             return "ok", 200
 
                         # ADMIN STUDENT <student_id>
@@ -757,8 +808,14 @@ def webhook():
                             if len(parts) != 3:
                                 send_message(sender_id, usage("ADMIN STUDENT", "ADMIN STUDENT <student_id>", "ADMIN STUDENT 2020-12345"))
                                 return "ok", 200
+                        
+                            admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
+                            if not admin_user_id or not org_id:
+                                send_message(sender_id, "⛔ Admin access required.")
+                                return "ok", 200
+                        
                             student_id_input = parts[2].strip()
-                            send_message(sender_id, handle_admin_student(cur, today_ph, student_id_input))
+                            send_message(sender_id, handle_admin_student(cur, today_ph, org_id, student_id_input))
                             return "ok", 200
 
                         # ADMIN CLASS <course> <section>
@@ -766,9 +823,15 @@ def webhook():
                             if len(parts) != 4:
                                 send_message(sender_id, usage("ADMIN CLASS", "ADMIN CLASS <course> <section>", "ADMIN CLASS BSECE 4B"))
                                 return "ok", 200
+                        
+                            admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
+                            if not admin_user_id or not org_id:
+                                send_message(sender_id, "⛔ Admin access required.")
+                                return "ok", 200
+                        
                             course = parts[2].upper()
                             section = parts[3].upper()
-                            send_message(sender_id, handle_admin_class(cur, today_ph, course, section))
+                            send_message(sender_id, handle_admin_class(cur, today_ph, org_id, course, section))
                             return "ok", 200
 
                         # ADMIN SECTION <section>
@@ -776,11 +839,16 @@ def webhook():
                             if len(parts) != 3:
                                 send_message(sender_id, usage("ADMIN SECTION", "ADMIN SECTION <section>", "ADMIN SECTION 4B"))
                                 return "ok", 200
+                        
+                            admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
+                            if not admin_user_id or not org_id:
+                                send_message(sender_id, "⛔ Admin access required.")
+                                return "ok", 200
+                        
                             section = parts[2].upper()
-                            send_message(sender_id, handle_admin_section(cur, today_ph, section))
+                            send_message(sender_id, handle_admin_section(cur, today_ph, org_id, section))
                             return "ok", 200
 
-                        # ADMIN EXPORT CLASS <course> <section>
                         # ADMIN EXPORT CLASS <course> <section>
                         if cmd.startswith("ADMIN EXPORT CLASS"):
                             if len(parts) != 5:
@@ -789,6 +857,27 @@ def webhook():
                                     "ADMIN EXPORT CLASS <course> <section>",
                                     "ADMIN EXPORT CLASS BSECE 4B"
                                 ))
+                                return "ok", 200
+                        
+                            admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
+                            if not admin_user_id or not org_id:
+                                send_message(sender_id, "⛔ Admin access required.")
+                                return "ok", 200
+                        
+                            course = parts[3].upper()
+                            section = parts[4].upper()
+                        
+                            payload = {
+                                "org_id": org_id,
+                                "admin_user_id": admin_user_id,
+                                "course": course,
+                                "section": section,
+                                "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS
+                            }
+                        
+                            token = make_export_token(payload)
+                            link = f"https://{request.host}/export/class?token={token}"
+                            send_message(sender_id, f"📄 Export ready (valid for 5 minutes):\n{link}")
                             return "ok", 200
                     
                         course = parts[3].upper()
@@ -1659,6 +1748,7 @@ def admin_exports():
     error = None
 
     if request.method == "POST":
+        csrf_validate_or_abort()  # ✅ CSRF protection
         course = (request.form.get("course") or "").strip().upper()
         section = (request.form.get("section") or "").strip().upper()
 
@@ -1696,9 +1786,11 @@ def admin_exports():
         admin_name=session.get("admin_name","Admin")
     )
 
-def generate_join_code(length=6):
-    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    return "".join(secrets.choice(alphabet) for _ in range(length))
+JOIN_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # no O/0, no I/1
+
+def generate_join_code(length: int = 8) -> str:
+    return "".join(secrets.choice(JOIN_CODE_ALPHABET) for _ in range(length))
+
 
 def get_or_create_org_join_code(cur, org_id: int, admin_id: int = None) -> str:
     # 1️⃣ Check for existing ACTIVE + NOT expired code
@@ -1915,6 +2007,7 @@ def admin_organization():
                 join_code = get_or_create_org_join_code(cur, org_id, admin_id)
 
                 if request.method == "POST":
+                    csrf_validate_or_abort()  # ✅ CSRF protection
                     action = (request.form.get("action") or "").strip()
 
                     # ============================
@@ -1955,7 +2048,7 @@ def admin_organization():
                     # B) REGENERATE JOIN CODE
                     # ============================
                     elif action == "regen_join_code":
-                        new_code = generate_join_code(6)
+                        new_code = generate_join_code(8)
                         # retry collisions
                         for _ in range(6):
                             try:
@@ -1970,7 +2063,7 @@ def admin_organization():
                                 log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
                                 break
                             except Exception:
-                                new_code = generate_join_code(6)
+                                new_code = generate_join_code(8)
                         else:
                             error = "Failed to regenerate join code. Try again."
 
@@ -1999,9 +2092,15 @@ def admin_organization():
 # ADMIN handlers
 # =========================================================
 
-def handle_admin_missing_today(cur, today_ph: date, course: str = None, section: str = None) -> str:
-    where = ["r.date = %s", "r.time_in IS NOT NULL", "r.time_out IS NULL"]
-    params = [today_ph]
+def handle_admin_missing_today(cur, today_ph: date, org_id: int, course: str = None, section: str = None) -> str:
+    where = [
+        "r.date = %s",
+        "r.time_in IS NOT NULL",
+        "r.time_out IS NULL",
+        "COALESCE(u.role,'student')='student'",
+        "u.organization_id = %s"
+    ]
+    params = [today_ph, org_id]
 
     if course:
         where.append("UPPER(u.course) = %s")
@@ -2020,7 +2119,6 @@ def handle_admin_missing_today(cur, today_ph: date, course: str = None, section:
         WHERE {where_sql}
         ORDER BY u.course, u.section, u.full_name
     """, tuple(params))
-
     rows = cur.fetchall()
 
     scope = "All"
@@ -2044,53 +2142,78 @@ def handle_admin_missing_today(cur, today_ph: date, course: str = None, section:
 
     return "\n".join(lines)
 
-def handle_admin_summary(cur, today_ph: date) -> str:
-    cur.execute("SELECT COUNT(*) AS total FROM users WHERE COALESCE(role,'student')='student'")
+def handle_admin_summary(cur, today_ph: date, org_id: int) -> str:
+    # ✅ Students (org-scoped)
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM users
+        WHERE COALESCE(role,'student')='student'
+          AND organization_id = %s
+    """, (org_id,))
     total_students = int(cur.fetchone()["total"])
 
+    # ✅ Timed in today (org-scoped via JOIN)
     cur.execute("""
-        SELECT COUNT(DISTINCT user_id) AS count
-        FROM dtr_records
-        WHERE date = %s AND time_in IS NOT NULL
-    """, (today_ph,))
+        SELECT COUNT(DISTINCT r.user_id) AS count
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND u.organization_id = %s
+          AND COALESCE(u.role,'student')='student'
+    """, (today_ph, org_id))
     timed_in_today = int(cur.fetchone()["count"])
 
+    # ✅ Missing TIME OUT today (org-scoped)
     cur.execute("""
         SELECT COUNT(*) AS count
-        FROM dtr_records
-        WHERE date = %s AND time_in IS NOT NULL AND time_out IS NULL
-    """, (today_ph,))
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND r.time_out IS NULL
+          AND u.organization_id = %s
+          AND COALESCE(u.role,'student')='student'
+    """, (today_ph, org_id))
     missing_today = int(cur.fetchone()["count"])
 
+    # ✅ Late today (org-scoped)
     cur.execute("""
         SELECT COUNT(*) AS count
-        FROM dtr_records
-        WHERE date = %s AND is_late = TRUE
-    """, (today_ph,))
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.is_late = TRUE
+          AND u.organization_id = %s
+          AND COALESCE(u.role,'student')='student'
+    """, (today_ph, org_id))
     late_today = int(cur.fetchone()["count"])
 
-    # Completed (fast, no loops)
+    # ✅ Completed (org-scoped)
     cur.execute("""
         SELECT COUNT(*) AS c
         FROM users
         WHERE COALESCE(role,'student')='student'
+          AND organization_id = %s
           AND completion_status = 'COMPLETE'
-    """)
+    """, (org_id,))
     completed = int(cur.fetchone()["c"])
 
-    # At risk from snapshots (MED/HIGH) if available
+    # ✅ At risk from snapshots (org-scoped)
     cur.execute("""
         SELECT COUNT(*) AS c
         FROM risk_snapshots rs
         JOIN users u ON u.id = rs.user_id
         WHERE rs.snapshot_date = %s
           AND COALESCE(u.role,'student')='student'
+          AND u.organization_id = %s
           AND rs.risk_level IN ('MED','HIGH')
-    """, (today_ph,))
+    """, (today_ph, org_id))
     at_risk = int(cur.fetchone()["c"])
 
     return (
         f"📊 OJT Dashboard ({today_ph})\n\n"
+        f"🏫 Org ID: {org_id}\n"
         f"👥 Students: {total_students}\n"
         f"🟢 Timed In Today: {timed_in_today}\n"
         f"⚠️ Missing TIME OUT: {missing_today}\n"
@@ -2100,24 +2223,29 @@ def handle_admin_summary(cur, today_ph: date) -> str:
         f"Note: Risk depends on daily snapshot cron (/cron/risk-snapshot)."
     )
 
-def handle_admin_risk(cur, today_ph: date, course: str, section: str) -> str:
+def handle_admin_risk(cur, today_ph: date, org_id: int, course: str, section: str) -> str:
     cur.execute("""
         SELECT u.full_name, u.student_id, rs.risk_score, rs.risk_level, rs.reasons
         FROM risk_snapshots rs
         JOIN users u ON u.id = rs.user_id
         WHERE rs.snapshot_date = %s
           AND COALESCE(u.role,'student')='student'
+          AND u.organization_id = %s
           AND UPPER(u.course) = %s
           AND UPPER(u.section) = %s
         ORDER BY rs.risk_score DESC, u.full_name
         LIMIT 10
-    """, (today_ph, course.upper(), section.upper()))
+    """, (today_ph, org_id, course.upper(), section.upper()))
     rows = cur.fetchall()
 
     if not rows:
-        return f"📍 Risk ({course} {section}) — {today_ph}\nNo snapshot yet. Run /cron/risk-snapshot first."
+        return (
+            f"📍 Risk ({course} {section}) — {today_ph}\n"
+            f"🏫 Org ID: {org_id}\n"
+            "No snapshot yet. Run /cron/risk-snapshot first."
+        )
 
-    lines = [f"🚨 Risk Dashboard: {course} {section} ({today_ph})", ""]
+    lines = [f"🚨 Risk Dashboard: {course} {section} ({today_ph})", f"🏫 Org ID: {org_id}", ""]
     for r in rows:
         reasons = r.get("reasons") or {}
         reason_bits = []
@@ -2132,44 +2260,53 @@ def handle_admin_risk(cur, today_ph: date, course: str, section: str) -> str:
             reason_bits.append(f"near_end({b.get('days_left')}d,left {b.get('remaining_hours')}h)")
 
         why = ("; ".join(reason_bits)) if reason_bits else "—"
-        lines.append(f"- {r['full_name']} ({r['student_id']}): {r['risk_level']} {r['risk_score']}/100 — {why}")
+        lines.append(
+            f"- {r.get('full_name','')} ({r.get('student_id','')}): "
+            f"{r.get('risk_level','—')} {r.get('risk_score','—')}/100 — {why}"
+        )
 
     return "\n".join(lines)
 
-def handle_admin_student(cur, today_ph: date, student_id_input: str) -> str:
+def handle_admin_student(cur, today_ph: date, org_id: int, student_id_input: str) -> str:
+    # ✅ org-scoped student lookup
     cur.execute("""
-        SELECT id, full_name, student_id, section,
+        SELECT id, full_name, student_id, course, section,
                required_hours, start_date, end_date,
                completion_status, completed_at
         FROM users
         WHERE student_id = %s
-          AND role = 'student'
-    """, (student_id_input,))
+          AND COALESCE(role,'student')='student'
+          AND organization_id = %s
+        LIMIT 1
+    """, (student_id_input, org_id))
     student = cur.fetchone()
 
     if not student:
-        return "❌ Student not found."
+        return "❌ Student not found in your organization."
 
     user_id = student["id"]
     required_hours = int(student["required_hours"] or 240)
 
+    # Totals
     cur.execute("""
         SELECT COALESCE(SUM(COALESCE(minutes_worked,0)),0) AS total_minutes
         FROM dtr_records
         WHERE user_id = %s
     """, (user_id,))
-    total_minutes = int(cur.fetchone()["total_minutes"])
-    accumulated_hours = total_minutes / 60
-    remaining_hours = max(0, required_hours - accumulated_hours)
+    total_minutes = int(cur.fetchone()["total_minutes"] or 0)
+    accumulated_hours = total_minutes / 60.0
+    remaining_hours = max(0.0, required_hours - accumulated_hours)
 
+    # Late count
     cur.execute("""
         SELECT COUNT(*) AS late_count
         FROM dtr_records
         WHERE user_id = %s
           AND is_late = TRUE
     """, (user_id,))
-    late_count = int(cur.fetchone()["late_count"])
+    late_count = int(cur.fetchone()["late_count"] or 0)
 
+    # Missing time-outs (all-time)
     cur.execute("""
         SELECT COUNT(*) AS missing_count
         FROM dtr_records
@@ -2177,151 +2314,212 @@ def handle_admin_student(cur, today_ph: date, student_id_input: str) -> str:
           AND time_in IS NOT NULL
           AND time_out IS NULL
     """, (user_id,))
-    missing_count = int(cur.fetchone()["missing_count"])
+    missing_count = int(cur.fetchone()["missing_count"] or 0)
+
+    # Latest risk snapshot (optional but useful)
+    cur.execute("""
+        SELECT risk_level, risk_score
+        FROM risk_snapshots
+        WHERE user_id = %s
+          AND snapshot_date = %s
+        LIMIT 1
+    """, (user_id, today_ph))
+    rs = cur.fetchone() or {}
+    risk_level = rs.get("risk_level") or "—"
+    risk_score = rs.get("risk_score")
+    risk_text = f"{risk_level}" + (f" ({risk_score}/100)" if risk_score is not None else "")
 
     completion_status = student.get("completion_status") or "IN_PROGRESS"
     status_line = "🟢 IN PROGRESS"
     if completion_status == "COMPLETE":
         status_line = "✅ COMPLETE"
 
-    start = student["start_date"]
-    end = student["end_date"]
+    start = student.get("start_date")
+    end = student.get("end_date")
 
     return (
         f"👤 Student Overview\n\n"
-        f"Name: {student['full_name']}\n"
-        f"Student ID: {student['student_id']}\n"
-        f"Section: {student['section']}\n\n"
+        f"🏫 Org ID: {org_id}\n"
+        f"Name: {student.get('full_name','')}\n"
+        f"Student ID: {student.get('student_id','')}\n"
+        f"Course/Section: {student.get('course','')} {student.get('section','')}\n\n"
         f"OJT Period: {start} to {end}\n\n"
         f"📊 Progress\n"
         f"• Accumulated: {accumulated_hours:.1f}h\n"
         f"• Remaining: {remaining_hours:.1f}h (of {required_hours}h)\n"
         f"• Late Count: {late_count}\n"
-        f"• Missing Time-outs: {missing_count}\n\n"
+        f"• Missing Time-outs: {missing_count}\n"
+        f"• Risk Today: {risk_text}\n\n"
         f"🎯 Status: {status_line}"
     )
 
-def handle_admin_section(cur, today_ph: date, section: str) -> str:
-    # unchanged from your code (kept for continuity)
-    return handle_admin_class(cur, today_ph, course="", section=section)  # minimal placeholder to avoid duplicating logic
+def handle_admin_section(cur, today_ph: date, org_id: int, section: str) -> str:
+    section = (section or "").upper().strip()
 
-def handle_admin_class(cur, today_ph: date, course: str, section: str) -> str:
-    course = course.upper().strip() if course else ""
-    section = section.upper().strip()
-
-    # If course blank, show by section only
-    if course:
-        cur.execute("""
-            SELECT COUNT(*) AS total
-            FROM users
-            WHERE COALESCE(role,'student')='student'
-              AND UPPER(course) = %s
-              AND UPPER(section) = %s
-        """, (course, section))
-    else:
-        cur.execute("""
-            SELECT COUNT(*) AS total
-            FROM users
-            WHERE COALESCE(role,'student')='student'
-              AND UPPER(section) = %s
-        """, (section,))
-    total_students = int(cur.fetchone()["total"])
+    # Total students in this section (org-scoped)
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM users
+        WHERE COALESCE(role,'student')='student'
+          AND organization_id = %s
+          AND UPPER(section) = %s
+    """, (org_id, section))
+    total_students = int(cur.fetchone()["total"] or 0)
     if total_students == 0:
-        return f"❌ No students found in {course+' ' if course else ''}{section}."
+        return f"❌ No students found in section {section} (Org {org_id})."
 
-    if course:
-        cur.execute("""
-            SELECT COUNT(*) AS count
-            FROM dtr_records r
-            JOIN users u ON u.id = r.user_id
-            WHERE r.date = %s
-              AND r.time_in IS NOT NULL
-              AND UPPER(u.course) = %s
-              AND UPPER(u.section) = %s
-        """, (today_ph, course, section))
-    else:
-        cur.execute("""
-            SELECT COUNT(*) AS count
-            FROM dtr_records r
-            JOIN users u ON u.id = r.user_id
-            WHERE r.date = %s
-              AND r.time_in IS NOT NULL
-              AND UPPER(u.section) = %s
-        """, (today_ph, section))
-    timed_in_today = int(cur.fetchone()["count"])
+    # Timed in today
+    cur.execute("""
+        SELECT COUNT(DISTINCT r.user_id) AS count
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND COALESCE(u.role,'student')='student'
+          AND u.organization_id = %s
+          AND UPPER(u.section) = %s
+    """, (today_ph, org_id, section))
+    timed_in_today = int(cur.fetchone()["count"] or 0)
 
-    if course:
-        cur.execute("""
-            SELECT u.full_name, u.student_id
-            FROM dtr_records r
-            JOIN users u ON u.id = r.user_id
-            WHERE r.date = %s
-              AND r.time_in IS NOT NULL
-              AND r.time_out IS NULL
-              AND UPPER(u.course) = %s
-              AND UPPER(u.section) = %s
-            ORDER BY u.full_name
-        """, (today_ph, course, section))
-    else:
-        cur.execute("""
-            SELECT u.full_name, u.student_id
-            FROM dtr_records r
-            JOIN users u ON u.id = r.user_id
-            WHERE r.date = %s
-              AND r.time_in IS NOT NULL
-              AND r.time_out IS NULL
-              AND UPPER(u.section) = %s
-            ORDER BY u.full_name
-        """, (today_ph, section))
+    # Missing time out today list
+    cur.execute("""
+        SELECT u.full_name, u.student_id, u.course
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND r.time_out IS NULL
+          AND COALESCE(u.role,'student')='student'
+          AND u.organization_id = %s
+          AND UPPER(u.section) = %s
+        ORDER BY u.course, u.full_name
+    """, (today_ph, org_id, section))
     missing_rows = cur.fetchall()
     missing_count = len(missing_rows)
 
-    if course:
-        cur.execute("""
-            SELECT COUNT(*) AS c
-            FROM users
-            WHERE COALESCE(role,'student')='student'
-              AND UPPER(course) = %s
-              AND UPPER(section) = %s
-              AND completion_status = 'COMPLETE'
-        """, (course, section))
-    else:
-        cur.execute("""
-            SELECT COUNT(*) AS c
-            FROM users
-            WHERE COALESCE(role,'student')='student'
-              AND UPPER(section) = %s
-              AND completion_status = 'COMPLETE'
-        """, (section,))
-    completed = int(cur.fetchone()["c"])
+    # Completed count
+    cur.execute("""
+        SELECT COUNT(*) AS c
+        FROM users
+        WHERE COALESCE(role,'student')='student'
+          AND organization_id = %s
+          AND UPPER(section) = %s
+          AND completion_status = 'COMPLETE'
+    """, (org_id, section))
+    completed = int(cur.fetchone()["c"] or 0)
 
-    # At-risk from snapshot for this scope
-    if course:
-        cur.execute("""
-            SELECT COUNT(*) AS c
-            FROM risk_snapshots rs
-            JOIN users u ON u.id = rs.user_id
-            WHERE rs.snapshot_date = %s
-              AND rs.risk_level IN ('MED','HIGH')
-              AND COALESCE(u.role,'student')='student'
-              AND UPPER(u.course) = %s
-              AND UPPER(u.section) = %s
-        """, (today_ph, course, section))
-    else:
-        cur.execute("""
-            SELECT COUNT(*) AS c
-            FROM risk_snapshots rs
-            JOIN users u ON u.id = rs.user_id
-            WHERE rs.snapshot_date = %s
-              AND rs.risk_level IN ('MED','HIGH')
-              AND COALESCE(u.role,'student')='student'
-              AND UPPER(u.section) = %s
-        """, (today_ph, section))
-    at_risk = int(cur.fetchone()["c"])
+    # At-risk (MED/HIGH)
+    cur.execute("""
+        SELECT COUNT(*) AS c
+        FROM risk_snapshots rs
+        JOIN users u ON u.id = rs.user_id
+        WHERE rs.snapshot_date = %s
+          AND rs.risk_level IN ('MED','HIGH')
+          AND COALESCE(u.role,'student')='student'
+          AND u.organization_id = %s
+          AND UPPER(u.section) = %s
+    """, (today_ph, org_id, section))
+    at_risk = int(cur.fetchone()["c"] or 0)
+
+    lines = [
+        f"📌 Section Dashboard: {section} ({today_ph})",
+        f"🏫 Org ID: {org_id}",
+        "",
+        f"👥 Students: {total_students}",
+        f"🟢 Timed In Today: {timed_in_today}",
+        f"⚠️ Missing TIME OUT: {missing_count}",
+        f"🎯 Completed: {completed}",
+        f"🚨 At Risk (MED/HIGH): {at_risk}",
+    ]
+
+    if missing_count > 0:
+        lines.append("")
+        lines.append("⚠️ Missing TIME OUT list:")
+        for r in missing_rows[:10]:
+            lines.append(f"- {r.get('full_name','')} ({r.get('student_id','')}) [{r.get('course','')}]")
+        if missing_count > 10:
+            lines.append(f"...and {missing_count - 10} more")
+
+    return "\n".join(lines)
+
+def handle_admin_class(cur, today_ph: date, org_id: int, course: str, section: str) -> str:
+    course = (course or "").upper().strip()
+    section = (section or "").upper().strip()
+
+    # Total students in class (org-scoped)
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM users
+        WHERE COALESCE(role,'student')='student'
+          AND organization_id = %s
+          AND UPPER(course) = %s
+          AND UPPER(section) = %s
+    """, (org_id, course, section))
+    total_students = int(cur.fetchone()["total"] or 0)
+    if total_students == 0:
+        return f"❌ No students found in {course} {section} (Org {org_id})."
+
+    # Timed in today
+    cur.execute("""
+        SELECT COUNT(DISTINCT r.user_id) AS count
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND COALESCE(u.role,'student')='student'
+          AND u.organization_id = %s
+          AND UPPER(u.course) = %s
+          AND UPPER(u.section) = %s
+    """, (today_ph, org_id, course, section))
+    timed_in_today = int(cur.fetchone()["count"] or 0)
+
+    # Missing TIME OUT today list
+    cur.execute("""
+        SELECT u.full_name, u.student_id
+        FROM dtr_records r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.date = %s
+          AND r.time_in IS NOT NULL
+          AND r.time_out IS NULL
+          AND COALESCE(u.role,'student')='student'
+          AND u.organization_id = %s
+          AND UPPER(u.course) = %s
+          AND UPPER(u.section) = %s
+        ORDER BY u.full_name
+    """, (today_ph, org_id, course, section))
+    missing_rows = cur.fetchall()
+    missing_count = len(missing_rows)
+
+    # Completed count (org-scoped)
+    cur.execute("""
+        SELECT COUNT(*) AS c
+        FROM users
+        WHERE COALESCE(role,'student')='student'
+          AND organization_id = %s
+          AND UPPER(course) = %s
+          AND UPPER(section) = %s
+          AND completion_status = 'COMPLETE'
+    """, (org_id, course, section))
+    completed = int(cur.fetchone()["c"] or 0)
+
+    # At-risk (MED/HIGH) from snapshot (org-scoped)
+    cur.execute("""
+        SELECT COUNT(*) AS c
+        FROM risk_snapshots rs
+        JOIN users u ON u.id = rs.user_id
+        WHERE rs.snapshot_date = %s
+          AND rs.risk_level IN ('MED','HIGH')
+          AND COALESCE(u.role,'student')='student'
+          AND u.organization_id = %s
+          AND UPPER(u.course) = %s
+          AND UPPER(u.section) = %s
+    """, (today_ph, org_id, course, section))
+    at_risk = int(cur.fetchone()["c"] or 0)
 
     title = f"{course} {section}".strip()
     lines = [
         f"📌 Class Dashboard: {title} ({today_ph})",
+        f"🏫 Org ID: {org_id}",
         "",
         f"👥 Students: {total_students}",
         f"🟢 Timed In Today: {timed_in_today}",
@@ -2339,32 +2537,6 @@ def handle_admin_class(cur, today_ph: date, course: str, section: str) -> str:
             lines.append(f"...and {missing_count - 10} more")
 
     return "\n".join(lines)
-
-def usage(cmd_name: str, usage_line: str, example_line: str) -> str:
-    return f"Usage: {usage_line}\nExample: {example_line}"
-
-def admin_help_text() -> str:
-    return (
-        "🧑‍💼 Admin Commands\n\n"
-        "Dashboards:\n"
-        "• ADMIN SUMMARY\n"
-        "• ADMIN CLASS <course> <section>\n"
-        "• ADMIN SECTION <section>\n"
-        "• ADMIN RISK <course> <section>\n\n"
-        "Compliance:\n"
-        "• ADMIN MISSING TODAY\n"
-        "• ADMIN MISSING TODAY <course>\n"
-        "• ADMIN MISSING TODAY <course> <section>\n\n"
-        "Exports:\n"
-        "• ADMIN EXPORT CLASS <course> <section>\n\n"
-        "Student lookup:\n"
-        "• ADMIN STUDENT <student_id>\n\n"
-        "Examples:\n"
-        "• ADMIN CLASS BSECE 4B\n"
-        "• ADMIN MISSING TODAY BSECE 4B\n"
-        "• ADMIN RISK BSECE 4B"
-    )
-
 # =========================================================
 # Home
 # =========================================================
@@ -2384,6 +2556,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
