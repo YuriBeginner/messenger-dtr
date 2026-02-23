@@ -2272,12 +2272,18 @@ def admin_organization():
                                     success = "Branding updated."
                     
                             elif action == "regen_join_code":
-                                # Deactivate previous
+                                # deactivate all old codes
                                 cur.execute("""
                                     UPDATE org_join_codes
                                     SET is_active = FALSE
                                     WHERE organization_id = %s
                                 """, (org_id,))
+                            
+                                # create a brand new one safely (returns a row)
+                                join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
+                            
+                                log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
+                                success = f"Join code regenerated: {join_code_row['code']}"
                     
                                 # Insert new (retry collisions)
                                 inserted = False
@@ -2886,6 +2892,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
