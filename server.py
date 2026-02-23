@@ -31,6 +31,22 @@ def inject_org_branding():
     if not org_id:
         return {"organization": None}
 
+    try:
+        conn = get_db_connection()
+        try:
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    org = get_org_branding(cur, org_id)
+                    return {"organization": org}
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception:
+        # ✅ Never crash page render if DB is down / env missing
+        return {"organization": None}
+
     conn = get_db_connection()
     try:
         with conn:
@@ -44,6 +60,13 @@ def inject_org_branding():
             conn.close()
         except Exception:
             pass
+
+@app.context_processor
+def inject_csrf_token():
+    try:
+        return {"csrf_token": csrf_get_token()}
+    except Exception:
+        return {"csrf_token": ""}
 
 @app.context_processor
 def inject_csrf_token():
@@ -250,7 +273,9 @@ def login_attempt_reset(cur, email: str):
 # =========================================================
 
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL)
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL env var is not set")
+    return psycopg2.connect(DATABASE_URL, connect_timeout=10)
 
 def get_user_role(cur, sender_id: str):
     cur.execute("""
@@ -2627,6 +2652,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
