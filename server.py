@@ -652,6 +652,12 @@ def db_debug_org_joincodes():
         conn.close()
 
 
+@app.errorhandler(400)
+def bad_request(e):
+    print("BAD_REQUEST:", repr(e))
+    return "Bad Request", 400
+
+
 # =========================================================
 # Completion + Risk Helpers
 # =========================================================
@@ -2817,6 +2823,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
