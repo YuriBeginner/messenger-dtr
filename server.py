@@ -10,6 +10,7 @@ import os
 import psycopg2
 import secrets
 import string
+import time as _time
 from psycopg2.extras import RealDictCursor
 from psycopg2 import errors
 from flask import Response
@@ -232,7 +233,7 @@ def login_attempt_get(cur, email: str):
     cur.execute("""
         SELECT email, failed_attempts, locked_until
         FROM admin_login_attempts
-        WHERE lower(email) = %s
+        WHERE email = %s
         LIMIT 1
     """, (email,))
     return cur.fetchone()
@@ -244,7 +245,7 @@ def login_attempt_record_failure(cur, email: str):
     cur.execute("""
         INSERT INTO admin_login_attempts (email, failed_attempts, locked_until, updated_at)
         VALUES (%s, 1, NULL, now())
-        ON CONFLICT (lower(email))
+        ON CONFLICT (email)
         DO UPDATE SET
             failed_attempts = admin_login_attempts.failed_attempts + 1,
             updated_at = now()
@@ -258,14 +259,14 @@ def login_attempt_record_failure(cur, email: str):
             UPDATE admin_login_attempts
             SET locked_until = %s,
                 updated_at = now()
-            WHERE lower(email) = %s
+            WHERE email = %s
         """, (locked_until, email))
 
 def login_attempt_reset(cur, email: str):
     email = _norm_email(email)
     cur.execute("""
         DELETE FROM admin_login_attempts
-        WHERE lower(email) = %s
+        WHERE email = %s
     """, (email,))
 
 # =========================================================
@@ -1453,7 +1454,7 @@ def admin_login():
                 cur.execute("""
                     SELECT id, full_name, role, password_hash, organization_id
                     FROM users
-                    WHERE lower(email) = %s
+                    WHERE email = %s
                     LIMIT 1
                 """, (email,))
                 u = cur.fetchone()
@@ -2679,6 +2680,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
