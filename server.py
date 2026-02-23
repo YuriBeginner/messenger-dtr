@@ -2174,6 +2174,27 @@ def admin_organization():
                 # ✅ Always load join code (create if missing)
                 join_code = get_or_create_org_join_code(cur, org_id, admin_id)
 
+                # ✅ Count total students in this organization
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM users
+                    WHERE organization_id = %s
+                      AND COALESCE(role,'student')='student'
+                """, (org_id,))
+                student_count = int(cur.fetchone()["c"] or 0)
+                
+                # ✅ Calculate join code expiration remaining days
+                from datetime import timezone
+                
+                expires_at = join_code.get("expires_at")
+                days_remaining = None
+                
+                if expires_at:
+                    now = datetime.now(timezone.utc)
+                    expires_at_utc = as_aware_utc(expires_at)
+                    delta = expires_at_utc - now
+                    days_remaining = max(delta.days, 0)
+
                 if request.method == "POST":
                     csrf_validate_or_abort()  # ✅ CSRF protection
                     action = (request.form.get("action") or "").strip()
@@ -2250,6 +2271,8 @@ def admin_organization():
             success=success,
             org=org,
             join_code=join_code
+            student_count=student=count
+            days_remaining=days_remaining
         )
     finally:
         conn.close()
@@ -2724,6 +2747,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
