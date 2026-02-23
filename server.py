@@ -74,6 +74,8 @@ OFFICIAL_START_MINUTE = 0
 GRACE_MINUTES = 10  # grace period for lateness
 REG_SESSION_EXPIRY_MINUTES = 15
 EXPORT_TOKEN_TTL_SECONDS = 300  # 5 minutes
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_LOCK_MINUTES = 10
 
 
 # =========================================================
@@ -196,6 +198,52 @@ def csrf_validate_or_abort():
         abort(400)
 
 
+# =========================================================
+# Email Login Security
+# =========================================================
+def _norm_email(email: str) -> str:
+    return (email or "").strip().lower()
+
+def login_attempt_get(cur, email: str):
+    email = _norm_email(email)
+    cur.execute("""
+        SELECT email, failed_attempts, locked_until
+        FROM admin_login_attempts
+        WHERE lower(email) = %s
+        LIMIT 1
+    """, (email,))
+    return cur.fetchone()
+
+def login_attempt_record_failure(cur, email: str):
+    email = _norm_email(email)
+    now_utc = datetime.now(timezone.utc)
+
+    cur.execute("""
+        INSERT INTO admin_login_attempts (email, failed_attempts, locked_until, updated_at)
+        VALUES (%s, 1, NULL, now())
+        ON CONFLICT (lower(email))
+        DO UPDATE SET
+            failed_attempts = admin_login_attempts.failed_attempts + 1,
+            updated_at = now()
+        RETURNING failed_attempts
+    """, (email,))
+    attempts = int(cur.fetchone()["failed_attempts"])
+
+    if attempts >= MAX_LOGIN_ATTEMPTS:
+        locked_until = now_utc + timedelta(minutes=LOGIN_LOCK_MINUTES)
+        cur.execute("""
+            UPDATE admin_login_attempts
+            SET locked_until = %s,
+                updated_at = now()
+            WHERE lower(email) = %s
+        """, (locked_until, email))
+
+def login_attempt_reset(cur, email: str):
+    email = _norm_email(email)
+    cur.execute("""
+        DELETE FROM admin_login_attempts
+        WHERE lower(email) = %s
+    """, (email,))
 
 # =========================================================
 # Database
@@ -1324,18 +1372,32 @@ def admin_login():
     if request.method == "GET":
         return render_template("admin/login.html", error=None)
 
-    csrf_validate_or_abort()  # ✅ add this line FIRST for POST
-
-    email = (request.form.get("email") or "").strip().lower()
+    email = _norm_email(request.form.get("email")) 
     password = request.form.get("password") or ""
-
+    
+    csrf_validate_or_abort()  # ✅ CSRF protection (keep this!)
+    
     if not email or not password:
         return render_template("admin/login.html", error="Email and password are required.")
-
+    
     conn = get_db_connection()
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # ✅ Check lock
+                attempt = login_attempt_get(cur, email)
+                now_utc = datetime.now(timezone.utc)
+    
+                if attempt and attempt.get("locked_until"):
+                    locked_until = as_aware_utc(attempt["locked_until"])
+                    if locked_until and now_utc < locked_until:
+                        mins = int((locked_until - now_utc).total_seconds() // 60) + 1
+                        return render_template(
+                            "admin/login.html",
+                            error=f"Too many failed attempts. Try again in about {mins} minute(s)."
+                        )
+    
+                # ✅ Look up admin account
                 cur.execute("""
                     SELECT id, full_name, role, password_hash, organization_id
                     FROM users
@@ -1343,21 +1405,28 @@ def admin_login():
                     LIMIT 1
                 """, (email,))
                 u = cur.fetchone()
-
+    
+                # Invalid user / not admin / missing hash
                 if (not u) or (u.get("role") != "admin") or (not u.get("password_hash")):
+                    login_attempt_record_failure(cur, email)
                     return render_template("admin/login.html", error="Invalid credentials.")
-
+    
+                # Wrong password
                 if not check_password_hash(u["password_hash"], password):
+                    login_attempt_record_failure(cur, email)
                     return render_template("admin/login.html", error="Invalid credentials.")
-
-                # ✅ store org in session
+    
+                # ✅ Success: reset attempts
+                login_attempt_reset(cur, email)
+    
                 session["admin_user_id"] = u["id"]
                 session["admin_name"] = u.get("full_name") or "Admin"
                 session["org_id"] = u.get("organization_id")
-
+                session.permanent = True  # if you enabled permanent lifetime
+    
                 log_admin_action(cur, u["id"], "PORTAL_LOGIN")
                 return redirect(url_for("admin_dashboard"))
-
+    
     finally:
         conn.close()
 
@@ -2558,6 +2627,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
