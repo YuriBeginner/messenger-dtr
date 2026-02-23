@@ -15,6 +15,7 @@
   {% endif %}
 
   <form method="post" class="mt-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="action" value="regen_join_code">
     <button class="btn btn-dark btn-sm" type="submit">
       Generate New Join Code
@@ -36,6 +37,7 @@
   </div>
 
   <form method="POST">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="mb-3">
       <label class="form-label">Organization Name</label>
       <input class="form-control" value="{{ org.name }}" disabled>
