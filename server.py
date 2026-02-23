@@ -1700,31 +1700,46 @@ def generate_join_code(length=6):
     alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
-def get_or_create_org_join_code(cur, org_id: int) -> str:
-    # 1) If already exists and has a code, return it
-    cur.execute("SELECT code FROM org_join_codes WHERE organization_id=%s", (org_id,))
+def get_or_create_org_join_code(cur, org_id: int, admin_id: int = None) -> str:
+    # 1️⃣ Check for existing ACTIVE + NOT expired code
+    cur.execute("""
+        SELECT code
+        FROM org_join_codes
+        WHERE organization_id = %s
+          AND is_active = true
+          AND (expires_at IS NULL OR expires_at > now())
+        LIMIT 1
+    """, (org_id,))
+    
     row = cur.fetchone()
     if row and row.get("code"):
         return row["code"]
 
-    # 2) Generate and try until success
-    # 20 attempts is plenty with 8-char A-Z0-9
+    # 2️⃣ Deactivate any old codes
+    cur.execute("""
+        UPDATE org_join_codes
+        SET is_active = false
+        WHERE organization_id = %s
+    """, (org_id,))
+
+    # 3️⃣ Generate new code safely
     for _ in range(20):
         code = generate_join_code(8)
+
         try:
             cur.execute("""
-                INSERT INTO org_join_codes (organization_id, code, created_at)
-                VALUES (%s, %s, now())
-                ON CONFLICT (organization_id)
-                DO UPDATE SET code = EXCLUDED.code, created_at = now()
-            """, (org_id, code))
+                INSERT INTO org_join_codes
+                (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
+                VALUES (%s, %s, true, now() + interval '30 days', %s, now())
+            """, (org_id, code, admin_id))
+            
             return code
-        except errors.UniqueViolation:
-            # Code collision with UNIQUE(code) — try again
+
+        except Exception:
+            # likely UNIQUE(code) collision
             continue
 
     raise RuntimeError("Failed to generate join code (too many collisions)")
-
 
 
 @app.route("/export/class")
@@ -1897,7 +1912,7 @@ def admin_organization():
                 org = get_org_branding(cur, org_id)
 
                 # ✅ Always load join code (create if missing)
-                join_code = get_or_create_org_join_code(cur, org_id)
+                join_code = get_or_create_org_join_code(cur, org_id, admin_id)
 
                 if request.method == "POST":
                     action = (request.form.get("action") or "").strip()
@@ -2369,6 +2384,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
