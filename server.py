@@ -2278,20 +2278,20 @@ def admin_organization():
                     # D) ACTIVATE LATEST JOIN CODE
                     # ----------------------------
                     elif action == "activate_join_code":
-                    cur.execute("""
-                        WITH latest AS (
-                            SELECT id
-                            FROM org_join_codes
-                            WHERE organization_id = %s
-                            ORDER BY id DESC
-                            LIMIT 1
-                        )
-                        UPDATE org_join_codes
-                        SET is_active = TRUE
-                        WHERE id IN (SELECT id FROM latest)
-                    """, (org_id,))
-                    log_admin_action(cur, admin_id, "JOIN_CODE_ACTIVATED")
-                    success = "Join code activated."
+                        cur.execute("""
+                            WITH latest AS (
+                                SELECT id
+                                FROM org_join_codes
+                                WHERE organization_id = %s
+                                ORDER BY id DESC
+                                LIMIT 1
+                            )
+                            UPDATE org_join_codes
+                            SET is_active = TRUE
+                            WHERE id IN (SELECT id FROM latest)
+                        """, (org_id,))
+                        log_admin_action(cur, admin_id, "JOIN_CODE_ACTIVATED")
+                        success = "Join code activated."
 
                     else:
                         error = "Unknown action."
@@ -2808,6 +2808,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
