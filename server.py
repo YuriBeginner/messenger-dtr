@@ -2002,48 +2002,51 @@ def generate_join_code(length: int = 8) -> str:
     return "".join(secrets.choice(JOIN_CODE_ALPHABET) for _ in range(length))
 
 
-def get_or_create_org_join_code(cur, org_id: int, admin_id: int):
-    # 1) Prefer ACTIVE + NOT expired
+def get_or_create_org_join_code(cur, org_id: int, admin_id: int = None) -> dict:
+    """
+    Returns a join code ROW dict:
+    {id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id}
+    Always returns a row (never a plain string).
+    """
+
+    # 1) Try existing active, not expired
     cur.execute("""
-        SELECT id, organization_id, code, is_active, expires_at
+        SELECT id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
         FROM org_join_codes
         WHERE organization_id = %s
           AND is_active = TRUE
-          AND (expires_at IS NULL OR expires_at > now())
-        ORDER BY id DESC
+          AND (expires_at IS NULL OR now() <= expires_at)
+        ORDER BY created_at DESC
         LIMIT 1
     """, (org_id,))
     row = cur.fetchone()
     if row:
         return row
 
-    # 2) If no active code, get latest code (so Activate can work)
+    # 2) Deactivate old codes (safety)
     cur.execute("""
-        SELECT id, organization_id, code, is_active, expires_at
-        FROM org_join_codes
+        UPDATE org_join_codes
+        SET is_active = FALSE
         WHERE organization_id = %s
-        ORDER BY id DESC
-        LIMIT 1
     """, (org_id,))
-    row = cur.fetchone()
-    if row:
-        return row
 
-    # 3) Otherwise create a new one
+    # 3) Create new code with retry on UNIQUE(code) collisions
     for _ in range(20):
         code = generate_join_code(8)
         try:
             cur.execute("""
                 INSERT INTO org_join_codes
-                (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
-                VALUES (%s, %s, TRUE, now() + interval '30 days', %s, now())
-                RETURNING id, organization_id, code, is_active, expires_at
+                    (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
+                VALUES
+                    (%s, %s, TRUE, now() + interval '30 days', %s, now())
+                RETURNING id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
             """, (org_id, code, admin_id))
             return cur.fetchone()
         except Exception:
+            # likely UNIQUE(code) collision
             continue
 
-    raise RuntimeError("Failed to create join code (too many collisions)")
+    raise RuntimeError("Failed to generate join code (too many collisions)")
 
 @app.route("/export/class")
 def export_class_csv():
@@ -2827,6 +2830,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
