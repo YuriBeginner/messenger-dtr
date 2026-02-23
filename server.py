@@ -2237,27 +2237,50 @@ def admin_organization():
                     # B) REGENERATE JOIN CODE
                     # ============================
                     elif action == "regen_join_code":
-                        new_code = generate_join_code(8)
-                        # retry collisions
-                        for _ in range(6):
+                        # 1) deactivate all old codes
+                        cur.execute("""
+                            UPDATE org_join_codes
+                            SET is_active = FALSE
+                            WHERE organization_id = %s
+                        """, (org_id,))
+                    
+                        # 2) insert new unique code (retry collisions)
+                        for _ in range(20):
+                            code = generate_join_code(8)
                             try:
                                 cur.execute("""
-                                    INSERT INTO org_join_codes (organization_id, code, created_at)
-                                    VALUES (%s, %s, now())
-                                    ON CONFLICT (organization_id)
-                                    DO UPDATE SET code = EXCLUDED.code, created_at = now()
-                                """, (org_id, new_code))
-                                join_code = new_code
+                                    INSERT INTO org_join_codes
+                                    (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
+                                    VALUES (%s, %s, TRUE, now() + interval '30 days', %s, now())
+                                """, (org_id, code, admin_id))
                                 success = "Join code regenerated."
                                 log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
                                 break
                             except Exception:
-                                new_code = generate_join_code(8)
+                                continue
                         else:
                             error = "Failed to regenerate join code. Try again."
 
-                    else:
-                        error = "Unknown action."
+                    elif action == "deactivate_join_code":
+                        cur.execute("""
+                            UPDATE org_join_codes
+                            SET is_active = FALSE
+                            WHERE organization_id = %s
+                              AND is_active = TRUE
+                        """, (org_id,))
+                        log_admin_action(cur, admin_user_id, "JOIN_CODE_DEACTIVATED")
+                        success = "Join code deactivated."
+                    
+                    elif action == "activate_join_code":
+                        cur.execute("""
+                            UPDATE org_join_codes
+                            SET is_active = TRUE
+                            WHERE organization_id = %s
+                            ORDER BY created_at DESC
+                            LIMIT 1
+                        """, (org_id,))
+                        log_admin_action(cur, admin_user_id, "JOIN_CODE_ACTIVATED")
+                        success = "Join code activated."
 
         return render_template(
             "admin/organization.html",
@@ -2747,6 +2770,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
