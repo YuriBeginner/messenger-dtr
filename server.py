@@ -21,6 +21,8 @@ from flask import session, redirect, url_for, abort
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from psycopg2 import Error as PGError
+from psycopg2 import errors
+
 
 
 app = Flask(__name__)
@@ -2014,23 +2016,13 @@ def _org_join_codes_has_created_by_admin_id(cur) -> bool:
 def get_or_create_org_join_code(cur, org_id: int, admin_id: int = None) -> dict:
     """
     Returns a join code ROW dict:
-    {id, organization_id, code, is_active, expires_at, created_at, (optional) created_by_admin_id}
-    Always returns a row dict (never a plain string).
-    Safe against missing created_by_admin_id column.
-    Safe against aborted transactions by rolling back on INSERT errors.
+    {id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id}
+    Always returns a row (never a plain string).
     """
 
-    has_created_by = _org_join_codes_has_created_by_admin_id(cur)
-
-    # ----------------------------
-    # 1) Try existing active, not expired
-    # ----------------------------
-    select_cols = """
-        id, organization_id, code, is_active, expires_at, created_at
-    """ + (", created_by_admin_id" if has_created_by else "")
-
-    cur.execute(f"""
-        SELECT {select_cols}
+    # 1) Existing active + not expired
+    cur.execute("""
+        SELECT id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
         FROM org_join_codes
         WHERE organization_id = %s
           AND is_active = TRUE
@@ -2042,52 +2034,46 @@ def get_or_create_org_join_code(cur, org_id: int, admin_id: int = None) -> dict:
     if row:
         return row
 
-    # ----------------------------
-    # 2) Deactivate old codes
-    # ----------------------------
+    # 2) Deactivate old codes (ok even if none)
     cur.execute("""
         UPDATE org_join_codes
         SET is_active = FALSE
         WHERE organization_id = %s
     """, (org_id,))
 
-    # ----------------------------
-    # 3) Create new code with retry on UNIQUE(code)
-    # IMPORTANT: must rollback on DB error or txn stays aborted
-    # ----------------------------
+    # 3) Create new code with SAVEPOINT retry
     for _ in range(20):
         code = generate_join_code(8)
+
+        # IMPORTANT: savepoint allows retry without killing the whole transaction
+        cur.execute("SAVEPOINT sp_join_code;")
         try:
-            if has_created_by:
-                cur.execute(f"""
-                    INSERT INTO org_join_codes
-                        (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
-                    VALUES
-                        (%s, %s, TRUE, now() + interval '30 days', %s, now())
-                    RETURNING {select_cols}
-                """, (org_id, code, admin_id))
-            else:
-                cur.execute(f"""
-                    INSERT INTO org_join_codes
-                        (organization_id, code, is_active, expires_at, created_at)
-                    VALUES
-                        (%s, %s, TRUE, now() + interval '30 days', now())
-                    RETURNING {select_cols}
-                """, (org_id, code))
+            cur.execute("""
+                INSERT INTO org_join_codes
+                    (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
+                VALUES
+                    (%s, %s, TRUE, now() + interval '30 days', %s, now())
+                RETURNING id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
+            """, (org_id, code, admin_id))
+            row = cur.fetchone()
+            cur.execute("RELEASE SAVEPOINT sp_join_code;")
+            return row
 
-            return cur.fetchone()
+        except psycopg2.Error as e:
+            # rollback just this attempt
+            cur.execute("ROLLBACK TO SAVEPOINT sp_join_code;")
+            cur.execute("RELEASE SAVEPOINT sp_join_code;")
 
-        except pg_errors.UniqueViolation:
-            # collision -> rollback then retry
-            cur.connection.rollback()
-            continue
+            # retry ONLY if it's a duplicate code collision
+            if isinstance(e, errors.UniqueViolation):
+                continue
 
-        except Exception:
-            # any other insert error -> rollback then retry
-            cur.connection.rollback()
-            continue
+            # any other DB error should NOT be swallowed
+            raise
 
-    raise RuntimeError("Failed to generate join code (too many collisions)")
+    raise RuntimeError("Failed to generate join code after 20 attempts")
+
+
 @app.route("/export/class")
 def export_class_csv():
     token = request.args.get("token", "")
@@ -2900,6 +2886,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
