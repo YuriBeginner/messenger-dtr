@@ -2,23 +2,61 @@
 {% block content %}
 
 <div class="card-soft p-3">
-  <div class="fw-bold mb-1">Join Code</div>
-  <div class="subtle mb-3">Students must send this in Messenger: <span class="fw-semibold">JOIN {{ join_code or "—" }}</span></div>
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="fw-bold">Join Code Management</div>
+
+    {% if days_remaining is not none %}
+      {% if days_remaining > 0 %}
+        <span class="badge bg-success">Active • {{ days_remaining }} days left</span>
+      {% else %}
+        <span class="badge bg-danger">Expired</span>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="subtle mb-3">
+    Students must send this in Messenger:
+    <span class="fw-semibold">JOIN {{ join_code or "—" }}</span>
+  </div>
 
   {% if join_code %}
-    <div class="d-flex gap-2 flex-wrap align-items-center">
-      <div class="badge-soft b-gray">JOIN {{ join_code }}</div>
-      <div class="subtle">Share this to your students.</div>
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <div class="border rounded p-2 text-center">
+          <div class="subtle small">Join Code</div>
+          <div class="fw-semibold">JOIN {{ join_code }}</div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="border rounded p-2 text-center">
+          <div class="subtle small">Students Registered</div>
+          <div class="fw-semibold">{{ student_count }}</div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="border rounded p-2 text-center">
+          <div class="subtle small">Expiration</div>
+          <div class="fw-semibold">
+            {% if days_remaining is not none %}
+              {{ days_remaining }} days
+            {% else %}
+              —
+            {% endif %}
+          </div>
+        </div>
+      </div>
     </div>
   {% else %}
-    <div class="subtle">No join code yet. Generate one below.</div>
+    <div class="subtle mb-3">No join code yet. Generate one below.</div>
   {% endif %}
 
-  <form method="post" class="mt-3">
+  <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="action" value="regen_join_code">
     <button class="btn btn-dark btn-sm" type="submit">
-      Generate New Join Code
+      Regenerate Join Code
     </button>
   </form>
 </div>
