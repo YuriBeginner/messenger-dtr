@@ -80,7 +80,11 @@
 
   <div class="card-body px-4 pb-4">
 
-    {% if error %}
+    {% if lock_seconds %}
+      <div class="alert alert-danger" id="lock-alert">
+        Account locked. Try again in <span id="countdown"></span>.
+      </div>
+    {% elif error %}
       <div class="alert alert-danger">{{ error }}</div>
     {% endif %}
 
@@ -110,4 +114,30 @@
 </div>
 
 </body>
+  <script>
+    let lockSeconds = {{ lock_seconds|default(0) }};
+  
+    if (lockSeconds > 0) {
+      const countdownEl = document.getElementById("countdown");
+      const loginBtn = document.querySelector("button[type='submit']");
+      loginBtn.disabled = true;
+  
+      function updateCountdown() {
+        if (lockSeconds <= 0) {
+          countdownEl.innerText = "0m 0s";
+          loginBtn.disabled = false;
+          return;
+        }
+  
+        let mins = Math.floor(lockSeconds / 60);
+        let secs = lockSeconds % 60;
+        countdownEl.innerText = `${mins}m ${secs}s`;
+  
+        lockSeconds--;
+        setTimeout(updateCountdown, 1000);
+      }
+  
+      updateCountdown();
+    }
+  </script>
 </html>
