@@ -1961,38 +1961,47 @@ def generate_join_code(length: int = 8) -> str:
 
 
 def get_or_create_org_join_code(cur, org_id: int, admin_id: int):
-    # try to get active code
+    # 1) Prefer ACTIVE + NOT expired
     cur.execute("""
-        SELECT *
+        SELECT id, organization_id, code, is_active, expires_at
         FROM org_join_codes
         WHERE organization_id = %s
-        ORDER BY created_at DESC
+          AND is_active = TRUE
+          AND (expires_at IS NULL OR expires_at > now())
+        ORDER BY id DESC
         LIMIT 1
     """, (org_id,))
     row = cur.fetchone()
-
     if row:
         return row
 
-    # create if none exists
+    # 2) If no active code, get latest code (so Activate can work)
+    cur.execute("""
+        SELECT id, organization_id, code, is_active, expires_at
+        FROM org_join_codes
+        WHERE organization_id = %s
+        ORDER BY id DESC
+        LIMIT 1
+    """, (org_id,))
+    row = cur.fetchone()
+    if row:
+        return row
+
+    # 3) Otherwise create a new one
     for _ in range(20):
         code = generate_join_code(8)
         try:
             cur.execute("""
                 INSERT INTO org_join_codes
-                (organization_id, code, is_active, expires_at,
-                 created_by_admin_id, created_at)
-                VALUES (%s, %s, TRUE,
-                        now() + interval '30 days',
-                        %s, now())
-                RETURNING *
+                (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
+                VALUES (%s, %s, TRUE, now() + interval '30 days', %s, now())
+                RETURNING id, organization_id, code, is_active, expires_at
             """, (org_id, code, admin_id))
             return cur.fetchone()
         except Exception:
             continue
 
-    raise RuntimeError("Failed to create join code")
-
+    raise RuntimeError("Failed to create join code (too many collisions)")
 
 @app.route("/export/class")
 def export_class_csv():
@@ -2269,26 +2278,20 @@ def admin_organization():
                     # D) ACTIVATE LATEST JOIN CODE
                     # ----------------------------
                     elif action == "activate_join_code":
-                        cur.execute("""
-                            WITH latest AS (
-                                SELECT id
-                                FROM org_join_codes
-                                WHERE organization_id = %s
-                                ORDER BY created_at DESC
-                                LIMIT 1
-                            )
-                            UPDATE org_join_codes
-                            SET is_active = TRUE
-                            WHERE id IN (SELECT id FROM latest)
-                        """, (org_id,))
-
-                        log_admin_action(
-                            cur,
-                            admin_id,
-                            "JOIN_CODE_ACTIVATED"
+                    cur.execute("""
+                        WITH latest AS (
+                            SELECT id
+                            FROM org_join_codes
+                            WHERE organization_id = %s
+                            ORDER BY id DESC
+                            LIMIT 1
                         )
-
-                        success = "Join code activated."
+                        UPDATE org_join_codes
+                        SET is_active = TRUE
+                        WHERE id IN (SELECT id FROM latest)
+                    """, (org_id,))
+                    log_admin_action(cur, admin_id, "JOIN_CODE_ACTIVATED")
+                    success = "Join code activated."
 
                     else:
                         error = "Unknown action."
@@ -2805,6 +2808,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
