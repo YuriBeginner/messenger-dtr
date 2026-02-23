@@ -1184,6 +1184,18 @@ def cron_risk_snapshot():
 def health():
     return {"ok": True, "service": "ojt-management-portal"}, 200
 
+@app.route("/debug/db")
+def debug_db():
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                return {"db": "ok"}, 200
+        finally:
+            conn.close()
+    except Exception as e:
+        return {"db": "fail", "error": str(e)}, 500
 
 
 # =========================================================
@@ -2652,6 +2664,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
