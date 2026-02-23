@@ -62,17 +62,6 @@ def inject_org_branding():
         except Exception:
             pass
 
-@app.context_processor
-def inject_csrf_token():
-    try:
-        return {"csrf_token": csrf_get_token()}
-    except Exception:
-        return {"csrf_token": ""}
-
-@app.context_processor
-def inject_csrf_token():
-    return {"csrf_token": csrf_get_token()}
-
 
 VERIFY_TOKEN = "ojt_dtr_token"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
@@ -203,10 +192,7 @@ def get_org_branding(cur, org_id: int):
 # CSRF Helper function
 # =========================================================
 
-def csrf_get_token() -> str:
-    """
-    Returns a CSRF token stored in session. Creates one if missing.
-    """
+def get_csrf_token() -> str:
     tok = session.get("csrf_token")
     if not tok:
         tok = secrets.token_urlsafe(32)
@@ -214,13 +200,14 @@ def csrf_get_token() -> str:
     return tok
 
 def csrf_validate_or_abort():
-    """
-    Validates CSRF token from POST form.
-    """
-    form_tok = (request.form.get("csrf_token") or "").strip()
-    sess_tok = (session.get("csrf_token") or "").strip()
-    if not form_tok or not sess_tok or not hmac.compare_digest(form_tok, sess_tok):
+    # Accept token from form or headers
+    sent = (request.form.get("csrf_token") or request.headers.get("X-CSRF-Token") or "")
+    if not sent or sent != session.get("csrf_token"):
         abort(400)
+
+@app.context_processor
+def inject_csrf():
+    return {"csrf_token": get_csrf_token()}
 
 
 # =========================================================
@@ -2830,6 +2817,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
