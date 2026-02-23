@@ -1324,6 +1324,8 @@ def admin_login():
     if request.method == "GET":
         return render_template("admin/login.html", error=None)
 
+    csrf_validate_or_abort()  # ✅ add this line FIRST for POST
+
     email = (request.form.get("email") or "").strip().lower()
     password = request.form.get("password") or ""
 
