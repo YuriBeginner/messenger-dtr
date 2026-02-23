@@ -2282,42 +2282,49 @@ def admin_organization():
                                 error = None
 
                         elif action == "regen_join_code":
-                            # Deactivate all existing codes for this org
-                            cur.execute(
-                                """
-                                UPDATE org_join_codes
-                                SET is_active = FALSE
-                                WHERE organization_id = %s
-                                """,
-                                (org_id,),
-                            )
-
-                            # Insert a fresh code (retry collisions)
                             inserted = False
                             last_exc = None
+                        
                             for _ in range(20):
                                 code = generate_join_code(8)
+                        
+                                # SAVEPOINT lets us retry without killing the whole transaction
+                                cur.execute("SAVEPOINT sp_join_code")
+                        
                                 try:
-                                    # NOTE: include created_by_admin_id if your table has it
-                                    cur.execute(
-                                        """
+                                    cur.execute("""
                                         INSERT INTO org_join_codes
                                             (organization_id, code, is_active, expires_at, created_by_admin_id, created_at)
                                         VALUES
                                             (%s, %s, TRUE, now() + interval '30 days', %s, now())
-                                        """,
-                                        (org_id, code, admin_id),
-                                    )
+                                        ON CONFLICT (organization_id)
+                                        DO UPDATE SET
+                                            code = EXCLUDED.code,
+                                            is_active = TRUE,
+                                            expires_at = EXCLUDED.expires_at,
+                                            created_by_admin_id = EXCLUDED.created_by_admin_id,
+                                            created_at = now()
+                                        RETURNING id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
+                                    """, (org_id, code, admin_id))
+                        
+                                    join_code_row = cur.fetchone()
                                     inserted = True
                                     break
+                        
                                 except Exception as e:
                                     last_exc = e
-                                    # stay in same transaction; just try a new code
+                                    # rollback only the failed attempt, keep transaction usable
+                                    cur.execute("ROLLBACK TO SAVEPOINT sp_join_code")
+                                    cur.execute("RELEASE SAVEPOINT sp_join_code")
                                     continue
-
+                                finally:
+                                    # if success, release savepoint cleanly
+                                    if inserted:
+                                        cur.execute("RELEASE SAVEPOINT sp_join_code")
+                        
                             if not inserted:
                                 raise RuntimeError(f"Failed to generate join code after 20 attempts: {last_exc!r}")
-
+                        
                             log_admin_action(cur, admin_id, "ORG_JOIN_CODE_REGENERATE")
                             success = "Join code regenerated."
                             error = None
@@ -2913,6 +2920,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
