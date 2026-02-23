@@ -275,7 +275,22 @@ def login_attempt_reset(cur, email: str):
 def get_db_connection():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL env var is not set")
-    return psycopg2.connect(DATABASE_URL, connect_timeout=10)
+
+    last_err = None
+    for attempt in range(4):
+        try:
+            return psycopg2.connect(
+                DATABASE_URL,
+                connect_timeout=10,
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=5,
+            )
+        except psycopg2.OperationalError as e:
+            last_err = e
+            _time.sleep(0.6 * (2 ** attempt))  # 0.6, 1.2, 2.4, 4.8 sec
+    raise last_err
 
 def get_user_role(cur, sender_id: str):
     cur.execute("""
@@ -2664,6 +2679,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
