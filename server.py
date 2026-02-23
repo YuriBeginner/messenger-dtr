@@ -2271,7 +2271,7 @@ def admin_organization():
             success=success,
             org=org,
             join_code=join_code,
-            student_count=student=count,
+            student_count=student_count,
             days_remaining=days_remaining
         )
     finally:
@@ -2747,6 +2747,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
