@@ -238,7 +238,10 @@ def login_attempt_get(cur, email: str):
     """, (email,))
     return cur.fetchone()
 
-def login_attempt_record_failure(cur, email: str):
+def login_attempt_record_failure(cur, email: str) -> bool:
+    # ... your upsert/increment logic here ...
+    # after increment, if attempts >= 5 -> set locked_until
+    # return True if lock set, else False
     email = _norm_email(email)
     now_utc = datetime.now(timezone.utc)
 
@@ -268,6 +271,17 @@ def login_attempt_reset(cur, email: str):
         DELETE FROM admin_login_attempts
         WHERE email = %s
     """, (email,))
+
+def get_client_ip():
+    # Render / proxies often set X-Forwarded-For
+    xff = request.headers.get("X-Forwarded-For", "")
+    if xff:
+        # first IP is original client
+        return xff.split(",")[0].strip()
+    return request.remote_addr
+
+def get_user_agent():
+    return request.headers.get("User-Agent", "")
 
 # =========================================================
 # Database
@@ -1464,10 +1478,29 @@ def admin_login():
                 # Invalid user / not admin / missing hash
                 if (not u) or (u.get("role") != "admin") or (not u.get("password_hash")):
                     login_attempt_record_failure(cur, email)
+
+                    log_admin_action(
+                        cur,
+                        u["id"],  # admin user id (since email exists)
+                        "SECURITY_FAILED_LOGIN",
+                        target=email,
+                        metadata={"ip": ip, "ua": ua, "locked": bool(locked)}
+                    )
+                    
+                    if locked:
+                        log_admin_action(
+                            cur,
+                            u["id"],
+                            "SECURITY_ACCOUNT_LOCKED",
+                            target=email,
+                            metadata={"ip": ip, "ua": ua, "lock_minutes": 10}
+                        )
                     return render_template("admin/login.html", error="Invalid credentials.")
     
                 # Wrong password
                 if not check_password_hash(u["password_hash"], password):
+                    ip = get_client_ip()
+                    ua = get_user_agent()
                     login_attempt_record_failure(cur, email)
                     return render_template("admin/login.html", error="Invalid credentials.")
     
@@ -1479,7 +1512,16 @@ def admin_login():
                 session["org_id"] = u.get("organization_id")
                 session.permanent = True  # if you enabled permanent lifetime
     
-                log_admin_action(cur, u["id"], "PORTAL_LOGIN")
+                ip = get_client_ip()
+                ua = get_user_agent()
+                
+                log_admin_action(
+                    cur,
+                    u["id"],
+                    "SECURITY_LOGIN_SUCCESS",
+                    target=email,
+                    metadata={"ip": ip, "ua": ua}
+                )
                 return redirect(url_for("admin_dashboard"))
     
     finally:
@@ -2682,6 +2724,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
