@@ -2356,8 +2356,13 @@ def admin_organization():
                           AND COALESCE(role,'student')='student'
                     """, (org_id,))
                     student_count = int(cur.fetchone()["c"] or 0)
-
+                    
+                    # --- Join code row (dict) ---
+                    join_code_row = get_or_create_org_join_code(cur, org_id, admin_id)
+                    
                     # --- Expiration ---
+                    from datetime import timezone
+                    
                     expires_at = join_code_row.get("expires_at") if join_code_row else None
                     days_remaining = None
                     if expires_at:
@@ -2365,9 +2370,10 @@ def admin_organization():
                         expires_at_utc = as_aware_utc(expires_at)
                         delta = expires_at_utc - now
                         days_remaining = max(delta.days, 0)
-
+                    
+                    # --- Join code string (THIS is what template should use) ---
                     join_code = join_code_row.get("code") if join_code_row else None
-
+                    
                     return render_template(
                         "admin/organization.html",
                         page_title="Organization",
@@ -2378,7 +2384,7 @@ def admin_organization():
                         error=error,
                         success=success,
                         org=org,
-                        join_code=join_code,
+                        join_code=join_code,              # STRING
                         student_count=student_count,
                         days_remaining=days_remaining
                     )
@@ -2877,6 +2883,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
