@@ -12,9 +12,19 @@
 
 <div class="card p-3 shadow-sm">
   <form method="post" class="row g-2">
-    <div class="col-md-4"><input class="form-control" name="course" placeholder="Course (BSECE)" required></div>
-    <div class="col-md-3"><input class="form-control" name="section" placeholder="Section (4B)" required></div>
-    <div class="col-md-5 d-grid"><button class="btn btn-dark">Generate Class Summary Export</button></div>
-  </form>
+   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+   <div class="col-md-4">
+     <input class="form-control" name="course" placeholder="Course (BSECE)" required>
+   </div>
+
+   <div class="col-md-3">
+     <input class="form-control" name="section" placeholder="Section (4B)" required>
+   </div>
+
+   <div class="col-md-5 d-grid">
+     <button class="btn btn-dark">Generate Class Summary Export</button>
+   </div>
+ </form>
 </div>
 {% endblock %}
