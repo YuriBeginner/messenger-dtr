@@ -146,46 +146,7 @@ def fmt_hm(total_minutes: int):
     m = total_minutes % 60
     return f"{h}h {m}m"
 
-# =========================================================
-# Temporary debug route
-# =========================================================
 
-@app.route("/admin/db-debug-org-joincodes")
-@admin_required
-def db_debug_org_joincodes():
-    org_id = session.get("org_id")
-    if not org_id:
-        return {"ok": False, "error": "no org_id in session"}, 400
-
-    conn = get_db_connection()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # 1) table exists + columns check
-                cur.execute("""
-                    SELECT column_name, data_type
-                    FROM information_schema.columns
-                    WHERE table_schema='public'
-                      AND table_name='org_join_codes'
-                    ORDER BY ordinal_position
-                """)
-                cols = cur.fetchall()
-
-                # 2) pull latest 5 rows
-                cur.execute("""
-                    SELECT id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
-                    FROM org_join_codes
-                    WHERE organization_id = %s
-                    ORDER BY created_at DESC
-                    LIMIT 5
-                """, (org_id,))
-                rows = cur.fetchall()
-
-                return {"ok": True, "org_id": org_id, "columns": cols, "latest_rows": rows}, 200
-    except Exception as e:
-        return {"ok": False, "error": repr(e)}, 500
-    finally:
-        conn.close()
 
 # =========================================================
 # Secure Download Link Helper
@@ -661,6 +622,47 @@ def admin_required(view_func):
         return view_func(*args, **kwargs)
     return wrapper
 
+
+# =========================================================
+# Temporary debug route
+# =========================================================
+
+@app.route("/admin/db-debug-org-joincodes")
+@admin_required
+def db_debug_org_joincodes():
+    org_id = session.get("org_id")
+    if not org_id:
+        return {"ok": False, "error": "no org_id in session"}, 400
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                # 1) table exists + columns check
+                cur.execute("""
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_schema='public'
+                      AND table_name='org_join_codes'
+                    ORDER BY ordinal_position
+                """)
+                cols = cur.fetchall()
+
+                # 2) pull latest 5 rows
+                cur.execute("""
+                    SELECT id, organization_id, code, is_active, expires_at, created_at, created_by_admin_id
+                    FROM org_join_codes
+                    WHERE organization_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                """, (org_id,))
+                rows = cur.fetchall()
+
+                return {"ok": True, "org_id": org_id, "columns": cols, "latest_rows": rows}, 200
+    except Exception as e:
+        return {"ok": False, "error": repr(e)}, 500
+    finally:
+        conn.close()
 
 
 # =========================================================
@@ -2825,6 +2827,7 @@ def privacy():
 @app.route("/")
 def home():
     return "OJT DTR Bot Running"
+
 
 
 
