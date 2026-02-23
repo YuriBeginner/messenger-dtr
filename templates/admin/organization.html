@@ -21,7 +21,7 @@
       <div class="subtle">
         Students must send this in Messenger:
         <span class="fw-semibold">
-          JOIN {{ join_code_row.code if join_code_row else "—" }}
+          JOIN {{ join_code or "—" }}
         </span>
       </div>
       <div class="subtle mt-1">
@@ -31,14 +31,12 @@
 
     {# Status badge #}
     <div class="text-end">
-      {% if not join_code_row %}
+      {% if not join_code %}
         <span class="badge bg-secondary">NO CODE</span>
       {% else %}
-        {% set is_active = join_code_row.is_active %}
-        {% set expires_at = join_code_row.expires_at %}
-        {% if is_active and (days_remaining is none or days_remaining > 0) %}
+        {% if join_is_active and (days_remaining is none or days_remaining > 0) %}
           <span class="badge bg-success">ACTIVE</span>
-        {% elif is_active and (days_remaining is not none and days_remaining == 0) %}
+        {% elif join_is_active and (days_remaining is not none and days_remaining == 0) %}
           <span class="badge bg-danger">EXPIRED</span>
         {% else %}
           <span class="badge bg-warning text-dark">INACTIVE</span>
@@ -59,10 +57,10 @@
 
   <hr class="my-3">
 
-  {% if join_code_row %}
+  {% if join_code %}
     <div class="d-flex gap-2 flex-wrap align-items-center">
       <div class="badge-soft b-gray">
-        JOIN {{ join_code_row.code }}
+        JOIN {{ join_code }}
       </div>
       <div class="subtle">Share this code to your students.</div>
     </div>
@@ -71,7 +69,7 @@
   {% endif %}
 
   <div class="d-flex gap-2 flex-wrap mt-3">
-    {# Generate new join code #}
+    {# Regenerate #}
     <form method="post" class="d-inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="action" value="regen_join_code">
@@ -80,22 +78,22 @@
       </button>
     </form>
 
-    {# Deactivate #}
+    {# Deactivate (only if active) #}
     <form method="post" class="d-inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="action" value="deactivate_join_code">
       <button class="btn btn-outline-danger btn-sm" type="submit"
-              {% if not join_code_row or not join_code_row.is_active %}disabled{% endif %}>
+              {% if not join_code or not join_is_active %}disabled{% endif %}>
         Deactivate
       </button>
     </form>
 
-    {# Activate most recent #}
+    {# Activate (only if NOT active but code exists) #}
     <form method="post" class="d-inline">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="action" value="activate_join_code">
       <button class="btn btn-outline-success btn-sm" type="submit"
-              {% if not join_code_row or join_code_row.is_active %}disabled{% endif %}>
+              {% if not join_code or join_is_active %}disabled{% endif %}>
         Activate
       </button>
     </form>
@@ -105,7 +103,6 @@
     Tip: If you regenerate, old codes will be deactivated and a fresh code will be valid for 30 days.
   </div>
 </div>
-
 
 {# ===============================
    BRANDING CARD
@@ -117,6 +114,9 @@
   </div>
 
   <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="save_branding">
+
     <div class="mb-3">
       <label class="form-label">Organization Name</label>
       <input class="form-control" value="{{ org.name }}" disabled>
@@ -147,7 +147,6 @@
       </div>
     </div>
 
-    <input type="hidden" name="action" value="save_branding">
     <button class="btn btn-primary mt-3" type="submit">Save Branding</button>
   </form>
 </div>
