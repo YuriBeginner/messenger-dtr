@@ -24,9 +24,7 @@ from psycopg2 import Error as PGError
 from psycopg2 import errors
 
 
-from flask import Flask
 app = Flask(__name__)
-
 
 VERIFY_TOKEN = "ojt_dtr_token"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
@@ -540,42 +538,62 @@ def handle_registration(cur, sender_id: str, raw_text: str) -> str:
         reg_set_session(cur, sender_id, "confirm", data)
         return summary
 
-    uni_id = get_university_id_for_org(cur, org_id)
-    if not uni_id:
-        reg_delete_session(cur, sender_id)
-        return "⛔ Registration failed: organization is not linked to a university. Contact admin."
     
-    cur.execute("""
-        INSERT INTO users
-          (messenger_id, full_name, student_id, course, section, company_name,
-           required_hours, start_date, end_date,
-           role, organization_id, university_id, completion_status)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'student',%s,%s,'IN_PROGRESS')
-    """, (
-        sender_id,
-        data["full_name"],
-        data["student_id"],
-        data["course"],
-        data["section"],
-        data["company_name"],
-        int(data["required_hours"]),
-        data["start_date"],
-        data["end_date"],
-        org_id,
-        uni_id
-    ))
-    
+
+        if step == "confirm":
+        ans = txt.upper().strip()
+
+        if ans == "YES":
+            org_id = get_org_context(cur, sender_id)
+            if not org_id:
+                reg_delete_session(cur, sender_id)
+                return (
+                    "⛔ Registration failed: No school linked.\n\n"
+                    "Please send:\n"
+                    "JOIN <CODE>\n\n"
+                    "Then send:\n"
+                    "REGISTER"
+                )
+
+            # If you already added university layer, keep this:
+            uni_id = None
+            try:
+                uni_id = get_university_id_for_org(cur, org_id)
+            except Exception:
+                uni_id = None
+
+            if uni_id is None:
+                reg_delete_session(cur, sender_id)
+                return "⛔ Registration failed: organization is not linked to a university. Contact admin."
+
+            cur.execute("""
+                INSERT INTO users
+                  (messenger_id, full_name, student_id, course, section, company_name,
+                   required_hours, start_date, end_date,
+                   role, organization_id, university_id, completion_status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'student',%s,%s,'IN_PROGRESS')
+            """, (
+                sender_id,
+                data["full_name"],
+                data["student_id"],
+                data["course"],
+                data["section"],
+                data["company_name"],
+                int(data["required_hours"]),
+                data["start_date"],
+                data["end_date"],
+                org_id,
+                uni_id
+            ))
+
             reg_delete_session(cur, sender_id)
-    
-            # optional: clear org context after successful registration
             clear_org_context(cur, sender_id)
-    
             return "✅ Registration successful! Commands: TIME IN, TIME OUT, STATUS"
-    
-        if txt.upper() == "NO":
+
+        if ans == "NO":
             reg_delete_session(cur, sender_id)
             return "Okay. Reply REGISTER to start again."
-    
+
         return "Please reply YES to confirm or NO to restart."
 
 # =========================================================
@@ -2919,5 +2937,6 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
