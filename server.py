@@ -187,6 +187,18 @@ def get_org_branding(cur, org_id: int):
     """, (org_id,))
     return cur.fetchone()
 
+def get_university_id_for_org(cur, org_id: int) -> int | None:
+    cur.execute("""
+        SELECT university_id
+        FROM organizations
+        WHERE id = %s
+        LIMIT 1
+    """, (org_id,))
+    row = cur.fetchone()
+    if not row:
+        return None
+    return row.get("university_id")
+
 # =========================================================
 # CSRF Helper function
 # =========================================================
@@ -547,37 +559,30 @@ def handle_registration(cur, sender_id: str, raw_text: str) -> str:
         reg_set_session(cur, sender_id, "confirm", data)
         return summary
 
-    if step == "confirm":
-        if txt.upper() == "YES":
-            # ✅ Must have org context (from JOIN CODE)
-            org_id = get_org_context(cur, sender_id)
-            if not org_id:
-                reg_delete_session(cur, sender_id)
-                return (
-                    "⛔ Registration failed: No school linked.\n\n"
-                    "Please send:\n"
-                    "JOIN <CODE>\n\n"
-                    "Then send:\n"
-                    "REGISTER"
-                )
-
-            cur.execute("""
-                INSERT INTO users
-                  (messenger_id, full_name, student_id, course, section, company_name,
-                   required_hours, start_date, end_date, role, organization_id, completion_status)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'student',%s,'IN_PROGRESS')
-            """, (
-                sender_id,
-                data["full_name"],
-                data["student_id"],
-                data["course"],
-                data["section"],
-                data["company_name"],
-                int(data["required_hours"]),
-                data["start_date"],
-                data["end_date"],
-                org_id
-            ))
+    uni_id = get_university_id_for_org(cur, org_id)
+    if not uni_id:
+        reg_delete_session(cur, sender_id)
+        return "⛔ Registration failed: organization is not linked to a university. Contact admin."
+    
+    cur.execute("""
+        INSERT INTO users
+          (messenger_id, full_name, student_id, course, section, company_name,
+           required_hours, start_date, end_date,
+           role, organization_id, university_id, completion_status)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'student',%s,%s,'IN_PROGRESS')
+    """, (
+        sender_id,
+        data["full_name"],
+        data["student_id"],
+        data["course"],
+        data["section"],
+        data["company_name"],
+        int(data["required_hours"]),
+        data["start_date"],
+        data["end_date"],
+        org_id,
+        uni_id
+    ))
     
             reg_delete_session(cur, sender_id)
     
@@ -2911,3 +2916,4 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
