@@ -24,27 +24,8 @@ from psycopg2 import Error as PGError
 from psycopg2 import errors
 
 
-@app.context_processor
-def inject_org_branding():
-    org_id = session.get("org_id")
-    if not org_id:
-        return {"organization": None}
-
-    try:
-        conn = get_db_connection()
-        try:
-            with conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    org = get_org_branding(cur, org_id)
-                    return {"organization": org}
-        finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
-    except Exception:
-        # Never crash page render if DB is down / env missing
-        return {"organization": None}
+from flask import Flask
+app = Flask(__name__)
 
 
 VERIFY_TOKEN = "ojt_dtr_token"
@@ -1229,6 +1210,28 @@ def cron_risk_snapshot():
         return {"date": str(today_ph), "upserts": upserts}, 200
     finally:
         conn.close()
+
+@app.context_processor
+def inject_org_branding():
+    org_id = session.get("org_id")
+    if not org_id:
+        return {"organization": None}
+
+    try:
+        conn = get_db_connection()
+        try:
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    org = get_org_branding(cur, org_id)
+                    return {"organization": org}
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception:
+        # Never crash page render if DB is down / env missing
+        return {"organization": None}
 
 @app.route("/health")
 def health():
@@ -2916,4 +2919,5 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
