@@ -24,11 +24,6 @@ from psycopg2 import Error as PGError
 from psycopg2 import errors
 
 
-
-app = Flask(__name__)
-
-if __name__ == "__main__":
-    app.run()
 @app.context_processor
 def inject_org_branding():
     org_id = session.get("org_id")
@@ -48,26 +43,13 @@ def inject_org_branding():
             except Exception:
                 pass
     except Exception:
-        # ✅ Never crash page render if DB is down / env missing
+        # Never crash page render if DB is down / env missing
         return {"organization": None}
-
-    conn = get_db_connection()
-    try:
-        with conn:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                org = get_org_branding(cur, org_id)
-                return {"organization": org}
-    except Exception:
-        return {"organization": None}
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
 
 VERIFY_TOKEN = "ojt_dtr_token"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "").rstrip("/")
 DATABASE_URL = os.environ.get("DATABASE_URL")
 CRON_SECRET = os.environ.get("CRON_SECRET")
 DEFAULT_ORG_ID = int(os.environ.get("DEFAULT_ORG_ID", "0"))
@@ -178,6 +160,20 @@ def verify_export_token(token: str) -> dict | None:
         return payload
     except Exception:
         return None
+
+# =========================================================
+# URL Path
+# =========================================================
+
+def build_absolute_url(path: str) -> str:
+    """
+    Build canonical absolute URL using APP_BASE_URL if set, otherwise fallback to request.host.
+    """
+    base = APP_BASE_URL
+    if base:
+        return f"{base}{path}"
+    # fallback (not ideal, but works)
+    return f"https://{request.host}{path}"
 # =========================================================
 # Org branding
 # =========================================================
@@ -230,9 +226,9 @@ def login_attempt_get(cur, email: str):
     return cur.fetchone()
 
 def login_attempt_record_failure(cur, email: str) -> bool:
-    # ... your upsert/increment logic here ...
-    # after increment, if attempts >= 5 -> set locked_until
-    # return True if lock set, else False
+    """
+    Returns True if lock was set on this failure.
+    """
     email = _norm_email(email)
     now_utc = datetime.now(timezone.utc)
 
@@ -255,6 +251,9 @@ def login_attempt_record_failure(cur, email: str) -> bool:
                 updated_at = now()
             WHERE email = %s
         """, (locked_until, email))
+        return True
+
+    return False
 
 def login_attempt_reset(cur, email: str):
     email = _norm_email(email)
@@ -1017,32 +1016,10 @@ def webhook():
                             }
                         
                             token = make_export_token(payload)
-                            link = f"https://{request.host}/export/class?token={token}"
+                            link = build_absolute_url(f"/export/class?token={token}")     
                             send_message(sender_id, f"📄 Export ready (valid for 5 minutes):\n{link}")
                             return "ok", 200
-                    
-                        course = parts[3].upper()
-                        section = parts[4].upper()
-                    
-                        admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
-                        if not admin_user_id or not org_id:
-                            send_message(sender_id, "⛔ Admin access required.")
-                            return "ok", 200
-                    
-                        payload = {
-                            "org_id": org_id,
-                            "admin_user_id": admin_user_id,
-                            "course": course,
-                            "section": section,
-                            "exp": int(time.time()) + EXPORT_TOKEN_TTL_SECONDS
-                        }
-                    
-                        token = make_export_token(payload)
-                        link = f"https://{request.host}/export/class?token={token}"
-                        send_message(sender_id, f"📄 Export ready (valid for 5 minutes):\n{link}")
-                        return "ok", 200
-
-
+                            
                         # Unknown admin command (clean)
                         send_message(sender_id, "Unknown admin command. Type: ADMIN HELP")
                         return "ok", 200
@@ -1513,54 +1490,56 @@ def admin_login():
                 """, (email,))
                 u = cur.fetchone()
     
+                ip = get_client_ip()
+                ua = get_user_agent()
+                
                 # Invalid user / not admin / missing hash
                 if (not u) or (u.get("role") != "admin") or (not u.get("password_hash")):
-                    login_attempt_record_failure(cur, email)
-
-                    log_admin_action(
-                        cur,
-                        u["id"],  # admin user id (since email exists)
-                        "SECURITY_FAILED_LOGIN",
-                        target=email,
-                        metadata={"ip": ip, "ua": ua, "locked": bool(locked)}
-                    )
-                    
-                    if locked:
+                    locked = login_attempt_record_failure(cur, email)
+                
+                    # Only log with admin_user_id if the user row exists
+                    if u and u.get("id"):
                         log_admin_action(
                             cur,
                             u["id"],
-                            "SECURITY_ACCOUNT_LOCKED",
+                            "SECURITY_FAILED_LOGIN",
                             target=email,
-                            metadata={"ip": ip, "ua": ua, "lock_minutes": 10}
+                            metadata={"ip": ip, "ua": ua, "locked": locked}
                         )
+                        if locked:
+                            log_admin_action(
+                                cur,
+                                u["id"],
+                                "SECURITY_ACCOUNT_LOCKED",
+                                target=email,
+                                metadata={"ip": ip, "ua": ua, "lock_minutes": LOGIN_LOCK_MINUTES}
+                            )
+                
                     return render_template("admin/login.html", error="Invalid credentials.")
     
                 # Wrong password
                 if not check_password_hash(u["password_hash"], password):
                     ip = get_client_ip()
                     ua = get_user_agent()
-                    login_attempt_record_failure(cur, email)
-                    return render_template("admin/login.html", error="Invalid credentials.")
-    
-                # ✅ Success: reset attempts
-                login_attempt_reset(cur, email)
-    
-                session["admin_user_id"] = u["id"]
-                session["admin_name"] = u.get("full_name") or "Admin"
-                session["org_id"] = u.get("organization_id")
-                session.permanent = True  # if you enabled permanent lifetime
-    
-                ip = get_client_ip()
-                ua = get_user_agent()
+                    locked = login_attempt_record_failure(cur, email)
                 
-                log_admin_action(
-                    cur,
-                    u["id"],
-                    "SECURITY_LOGIN_SUCCESS",
-                    target=email,
-                    metadata={"ip": ip, "ua": ua}
-                )
-                return redirect(url_for("admin_dashboard"))
+                    log_admin_action(
+                        cur,
+                        u["id"],
+                        "SECURITY_FAILED_LOGIN",
+                        target=email,
+                        metadata={"ip": ip, "ua": ua, "locked": locked}
+                    )
+                    if locked:
+                        log_admin_action(
+                            cur,
+                            u["id"],
+                            "SECURITY_ACCOUNT_LOCKED",
+                            target=email,
+                            metadata={"ip": ip, "ua": ua, "lock_minutes": LOGIN_LOCK_MINUTES}
+                        )
+                
+                    return render_template("admin/login.html", error="Invalid credentials.")
     
     finally:
         conn.close()
@@ -2927,57 +2906,8 @@ def home():
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# =========================================================
+# App start (local only)
+# =========================================================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
