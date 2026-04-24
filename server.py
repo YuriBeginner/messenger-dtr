@@ -770,13 +770,17 @@ def create_university():
 
         if not name or not admin_name or not admin_email or not password:
             error = "All fields are required."
+        elif len(password) < 6:
+            error = "Password must be at least 6 characters."
         else:
             conn = get_db_connection()
             try:
                 with conn:
                     with conn.cursor(cursor_factory=RealDictCursor) as cur:
 
+                        # =========================
                         # 1️⃣ Create organization
+                        # =========================
                         cur.execute("""
                             INSERT INTO organizations (name)
                             VALUES (%s)
@@ -784,21 +788,49 @@ def create_university():
                         """, (name,))
                         org_id = cur.fetchone()["id"]
 
-                        # 2️⃣ Create admin
+                        # =========================
+                        # 2️⃣ Create admin (FIXED)
+                        # =========================
                         password_hash = generate_password_hash(password)
-                        
+
+                        messenger_id = f"admin_{admin_email}"  # ✅ REQUIRED
+
                         cur.execute("""
-                            INSERT INTO users
-                            (full_name, email, password_hash, role, organization_id, completion_status)
-                            VALUES (%s, %s, %s, 'admin', %s, 'IN_PROGRESS')
+                            INSERT INTO users (
+                                messenger_id,
+                                full_name,
+                                email,
+                                password_hash,
+                                role,
+                                organization_id,
+                                completion_status
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
                         """, (
+                            messenger_id,
                             admin_name,
                             admin_email,
                             password_hash,
-                            org_id
+                            "admin",
+                            org_id,
+                            "IN_PROGRESS"
                         ))
 
-                        success = "University and admin created successfully."
+                        # =========================
+                        # 3️⃣ AUTO GENERATE JOIN CODE 🔥
+                        # =========================
+                        join_code_row = get_or_create_org_join_code(
+                            cur,
+                            org_id,
+                            session["admin_user_id"]
+                        )
+
+                        success = (
+                            f"University created successfully.\n"
+                            f"Admin: {admin_email}\n"
+                            f"Password: {password}\n"
+                            f"Join Code: {join_code_row['code']}"
+                        )
 
             except Exception as e:
                 print("CREATE UNIVERSITY ERROR:", e)
@@ -812,8 +844,6 @@ def create_university():
         error=error,
         success=success
     )
-
-
 # =========================================================
 # Completion + Risk Helpers
 # =========================================================
@@ -3453,6 +3483,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
