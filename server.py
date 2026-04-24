@@ -1901,6 +1901,11 @@ def university_dashboard():
 
         return render_template(
             "admin/university_dashboard.html",
+            page_title="University Dashboard",
+            subtitle=str(today_ph),
+            last_updated=datetime.now(PH_TZ).strftime("%I:%M %p"),
+            active_page="dashboard",
+        
             total_students=total_students,
             timed_in_today=timed_in_today,
             missing_timeout_today=missing_timeout_today,
@@ -1908,7 +1913,7 @@ def university_dashboard():
             med_risk=med_risk,
             low_risk=low_risk,
             orgs=orgs,
-            today=today_ph,
+        
             admin_name=session.get("admin_name")
         )
 
@@ -3068,6 +3073,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
