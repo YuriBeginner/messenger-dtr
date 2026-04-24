@@ -1551,7 +1551,11 @@ def admin_login():
                     session["role"] = u.get("role")
                     
                     session["org_id"] = u.get("organization_id")
-                    session["university_id"] = get_university_id_for_org(cur, u.get("organization_id"))
+                    try:
+                        session["university_id"] = get_university_id_for_org(cur, u.get("organization_id"))
+                    except Exception as e:
+                        print("UNIVERSITY_ID_ERROR:", e)
+                        session["university_id"] = None
                     
                     # log success
                     log_admin_action(
@@ -1591,6 +1595,8 @@ def admin_login():
                         )
                 
                     return render_template("admin/login.html", error="Invalid credentials.")
+        # SAFETY FALLBACK (prevents 500)
+    return render_template("admin/login.html", error="Unexpected login error. Please try again.")                
     
     finally:
         conn.close()
@@ -3073,6 +3079,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
