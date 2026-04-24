@@ -715,10 +715,12 @@ def superadmin_dashboard():
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
 
+                # ===== MAIN TABLE DATA =====
                 cur.execute("""
                     SELECT 
                         u.id,
                         u.name,
+                        u.created_at,
 
                         COUNT(DISTINCT o.id) AS org_count,
 
@@ -737,12 +739,24 @@ def superadmin_dashboard():
                     GROUP BY u.id
                     ORDER BY u.id DESC
                 """)
-
                 universities = cur.fetchall()
+
+                # ===== TOTAL COUNTS (TOP CARDS) =====
+                cur.execute("SELECT COUNT(*) FROM universities")
+                total_universities = cur.fetchone()["count"]
+
+                cur.execute("SELECT COUNT(*) FROM users WHERE role='student'")
+                total_students = cur.fetchone()["count"]
+
+                cur.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
+                total_admins = cur.fetchone()["count"]
 
         return render_template(
             "superadmin/dashboard.html",
-            universities=universities
+            universities=universities,
+            total_universities=total_universities,
+            total_students=total_students,
+            total_admins=total_admins
         )
 
     finally:
@@ -3487,6 +3501,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
