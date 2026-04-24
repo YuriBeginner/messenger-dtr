@@ -781,11 +781,21 @@ def create_university():
                         # =========================
                         # 1️⃣ Create organization
                         # =========================
+                        # 1️⃣ Create university
                         cur.execute("""
-                            INSERT INTO organizations (name)
+                            INSERT INTO universities (name)
                             VALUES (%s)
                             RETURNING id
                         """, (name,))
+                        university_id = cur.fetchone()["id"]
+                        
+                        # 2️⃣ Create organization linked to university
+                        cur.execute("""
+                            INSERT INTO organizations (name, university_id)
+                            VALUES (%s, %s)
+                            RETURNING id
+                        """, (name, university_id))
+                        
                         org_id = cur.fetchone()["id"]
 
                         # =========================
@@ -3483,6 +3493,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
