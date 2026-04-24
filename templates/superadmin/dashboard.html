@@ -2,33 +2,161 @@
 <html>
 <head>
     <title>Super Admin Dashboard</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f7fb;
+            margin: 0;
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: auto;
+        }
+
+        /* ===== CARDS ===== */
+        .cards {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .card {
+            flex: 1;
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        }
+
+        .card h2 {
+            margin: 0;
+            font-size: 28px;
+            color: #111827;
+        }
+
+        .card p {
+            margin: 5px 0 0;
+            color: #6b7280;
+        }
+
+        /* ===== TABLE ===== */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        }
+
+        th, td {
+            padding: 12px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #111827;
+            color: white;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+
+        /* ===== BUTTON ===== */
+        .btn {
+            padding: 6px 12px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 14px;
+            background-color: #3b82f6;
+            color: white;
+        }
+
+        .btn:hover {
+            background-color: #2563eb;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .create-btn {
+            background: #10b981;
+        }
+
+        .create-btn:hover {
+            background: #059669;
+        }
+
+    </style>
 </head>
 <body>
 
-<h1>Super Admin Dashboard</h1>
+<div class="container">
 
-<h3>System Overview</h3>
-<ul>
-    <li>Total Universities: {{ total_orgs }}</li>
-    <li>Total Students: {{ total_students }}</li>
-    <li>Total Admins: {{ total_admins }}</li>
-</ul>
+    <!-- HEADER -->
+    <div class="header">
+        <h1>Super Admin Dashboard</h1>
+        <a href="/superadmin/create-university" class="btn create-btn">
+            + Create University
+        </a>
+    </div>
 
-<h3>Universities</h3>
-<table border="1">
-<tr>
-    <th>ID</th>
-    <th>Name</th>
-    <th>Created</th>
-</tr>
-{% for org in orgs %}
-<tr>
-    <td>{{ org.id }}</td>
-    <td>{{ org.name }}</td>
-    <td>{{ org.created_at }}</td>
-</tr>
-{% endfor %}
-</table>
+    <!-- OVERVIEW CARDS -->
+    <div class="cards">
+        <div class="card">
+            <h2>{{ total_orgs }}</h2>
+            <p>Universities</p>
+        </div>
+
+        <div class="card">
+            <h2>{{ total_students }}</h2>
+            <p>Students</p>
+        </div>
+
+        <div class="card">
+            <h2>{{ total_admins }}</h2>
+            <p>Admins</p>
+        </div>
+    </div>
+
+    <!-- TABLE -->
+    <h3>Universities</h3>
+
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Created</th>
+            <th>Action</th>
+        </tr>
+
+        {% for org in orgs %}
+        <tr>
+            <td>{{ org.id }}</td>
+            <td>{{ org.name }}</td>
+            <td>{{ org.created_at }}</td>
+            <td>
+                <a href="/superadmin/university/{{ org.id }}" class="btn">
+                    View
+                </a>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+
+</div>
 
 </body>
 </html>
