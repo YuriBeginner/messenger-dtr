@@ -743,13 +743,13 @@ def superadmin_dashboard():
 
                 # ===== TOTAL COUNTS (TOP CARDS) =====
                 cur.execute("SELECT COUNT(*) FROM universities")
-                total_universities = cur.fetchone()["count"]
+                total_universities = cur.fetchone()["count"] or 0
 
                 cur.execute("SELECT COUNT(*) FROM users WHERE role='student'")
-                total_students = cur.fetchone()["count"]
+                total_students = cur.fetchone()["count"] or 0
 
                 cur.execute("SELECT COUNT(*) FROM users WHERE role='admin'")
-                total_admins = cur.fetchone()["count"]
+                total_admins = cur.fetchone()["count"] or 0
 
         return render_template(
             "superadmin/dashboard.html",
@@ -3501,6 +3501,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
