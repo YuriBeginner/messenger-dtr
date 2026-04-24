@@ -768,12 +768,17 @@ def create_university():
 
                         # 2️⃣ Create admin
                         password_hash = generate_password_hash(password)
-
+                        
                         cur.execute("""
                             INSERT INTO users
                             (full_name, email, password_hash, role, organization_id, completion_status)
                             VALUES (%s, %s, %s, 'admin', %s, 'IN_PROGRESS')
-                        """, (admin_name, admin_email, password_hash, org_id))
+                        """, (
+                            admin_name,
+                            admin_email,
+                            password_hash,
+                            org_id
+                        ))
 
                         success = "University and admin created successfully."
 
@@ -3377,6 +3382,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
