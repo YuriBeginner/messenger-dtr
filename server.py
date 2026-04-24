@@ -1799,6 +1799,9 @@ def admin_login():
                     LIMIT 1
                 """, (email,))
                 u = cur.fetchone()
+                print("LOGIN DEBUG:")
+                print("Input email:", email)
+                print("DB user:", u)
 
                 ip = get_client_ip()
                 ua = get_user_agent()
@@ -3428,6 +3431,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
