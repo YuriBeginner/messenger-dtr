@@ -1272,6 +1272,9 @@ def create_admin():
     try:
         with conn:
             with conn.cursor() as cur:
+
+                org_id = 1  # 👈 CHANGE if needed
+
                 cur.execute("""
                     INSERT INTO users (
                         messenger_id,
@@ -1279,17 +1282,20 @@ def create_admin():
                         role,
                         email,
                         password_hash,
-                        is_super_admin
+                        organization_id,
+                        completion_status
                     )
-                    VALUES (%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
                 """, (
                     "manual_admin",
                     "Super Admin",
                     "admin",
                     "admin@test.com",
                     generate_password_hash("admin123"),
-                    True
+                    org_id,
+                    "IN_PROGRESS"
                 ))
+
         return "Admin created: admin@test.com / admin123"
     finally:
         conn.close()
@@ -3447,6 +3453,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
