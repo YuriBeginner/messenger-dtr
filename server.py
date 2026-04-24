@@ -1513,7 +1513,7 @@ def admin_login():
                 ua = get_user_agent()
                 
                 # Invalid user / not admin / missing hash
-                if (not u) or (u.get("role") != "admin") or (not u.get("password_hash")):
+                if (not u) or (u.get("role") not in ("org_admin", "university_admin")) or (not u.get("password_hash")):
                     locked = login_attempt_record_failure(cur, email)
                 
                     # Only log with admin_user_id if the user row exists
@@ -1535,6 +1535,38 @@ def admin_login():
                             )
                 
                     return render_template("admin/login.html", error="Invalid credentials.")
+
+                    # =========================
+                    # ✅ SUCCESSFUL LOGIN
+                    # =========================
+                    
+                    # reset login attempts
+                    login_attempt_reset(cur, email)
+                    
+                    # set session (IMPORTANT)
+                    session.clear()
+                    
+                    session["admin_user_id"] = u["id"]
+                    session["admin_name"] = u.get("full_name") or "Admin"
+                    session["role"] = u.get("role")
+                    
+                    session["org_id"] = u.get("organization_id")
+                    session["university_id"] = get_university_id_for_org(cur, u.get("organization_id"))
+                    
+                    # log success
+                    log_admin_action(
+                        cur,
+                        u["id"],
+                        "SECURITY_SUCCESSFUL_LOGIN",
+                        target=email,
+                        metadata={"ip": get_client_ip(), "ua": get_user_agent()}
+                    )
+                    
+                    # redirect based on role
+                    if u.get("role") == "university_admin":
+                        return redirect(url_for("university_dashboard"))
+                    else:
+                        return redirect(url_for("admin_dashboard"))
     
                 # Wrong password
                 if not check_password_hash(u["password_hash"], password):
@@ -1774,6 +1806,112 @@ def admin_dashboard():
             admin_name=session.get("admin_name", "Admin")
         )
     
+    finally:
+        conn.close()
+        
+
+@app.route("/admin/university-dashboard")
+@admin_required
+def university_dashboard():
+    # 🔒 Only university admins allowed
+    if session.get("role") != "university_admin":
+        abort(403)
+
+    today_ph = datetime.now(PH_TZ).date()
+    uni_id = session.get("university_id")
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+
+                # =========================
+                # TOTAL STUDENTS
+                # =========================
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM users
+                    WHERE university_id = %s
+                      AND COALESCE(role,'student')='student'
+                """, (uni_id,))
+                total_students = int(cur.fetchone()["c"])
+
+                # =========================
+                # TIMED IN TODAY
+                # =========================
+                cur.execute("""
+                    SELECT COUNT(DISTINCT r.user_id) AS c
+                    FROM dtr_records r
+                    JOIN users u ON u.id = r.user_id
+                    WHERE r.date = %s
+                      AND r.time_in IS NOT NULL
+                      AND u.university_id = %s
+                """, (today_ph, uni_id))
+                timed_in_today = int(cur.fetchone()["c"])
+
+                # =========================
+                # MISSING TIMEOUT TODAY
+                # =========================
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM dtr_records r
+                    JOIN users u ON u.id = r.user_id
+                    WHERE r.date = %s
+                      AND r.time_in IS NOT NULL
+                      AND r.time_out IS NULL
+                      AND u.university_id = %s
+                """, (today_ph, uni_id))
+                missing_timeout_today = int(cur.fetchone()["c"])
+
+                # =========================
+                # RISK COUNTS
+                # =========================
+                cur.execute("""
+                    SELECT
+                        SUM(CASE WHEN rs.risk_level='HIGH' THEN 1 ELSE 0 END) AS high,
+                        SUM(CASE WHEN rs.risk_level='MED'  THEN 1 ELSE 0 END) AS med,
+                        SUM(CASE WHEN rs.risk_level='LOW'  THEN 1 ELSE 0 END) AS low
+                    FROM risk_snapshots rs
+                    JOIN users u ON u.id = rs.user_id
+                    WHERE rs.snapshot_date = %s
+                      AND u.university_id = %s
+                """, (today_ph, uni_id))
+
+                rs = cur.fetchone() or {}
+                high_risk = int(rs.get("high") or 0)
+                med_risk  = int(rs.get("med") or 0)
+                low_risk  = int(rs.get("low") or 0)
+
+                # =========================
+                # ORG BREAKDOWN
+                # =========================
+                cur.execute("""
+                    SELECT
+                        o.name,
+                        COUNT(u.id) AS student_count
+                    FROM organizations o
+                    LEFT JOIN users u
+                      ON u.organization_id = o.id
+                     AND COALESCE(u.role,'student')='student'
+                    WHERE o.university_id = %s
+                    GROUP BY o.id
+                    ORDER BY student_count DESC
+                """, (uni_id,))
+                orgs = cur.fetchall()
+
+        return render_template(
+            "admin/university_dashboard.html",
+            total_students=total_students,
+            timed_in_today=timed_in_today,
+            missing_timeout_today=missing_timeout_today,
+            high_risk=high_risk,
+            med_risk=med_risk,
+            low_risk=low_risk,
+            orgs=orgs,
+            today=today_ph,
+            admin_name=session.get("admin_name")
+        )
+
     finally:
         conn.close()
 
@@ -2930,6 +3068,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
