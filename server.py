@@ -911,6 +911,26 @@ def verify():
     return "Verification failed", 403
 
 
+
+@app.route("/debug/set-password")
+def debug_set_password():
+    email = "admin@test.com"
+    new_password = "123456"
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET password_hash = %s
+                    WHERE email = %s
+                """, (generate_password_hash(new_password), email))
+        return "Password updated"
+    finally:
+        conn.close()
+
+
 # =========================================================
 # Webhook POST
 # =========================================================
@@ -3382,6 +3402,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
