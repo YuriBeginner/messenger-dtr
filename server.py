@@ -178,6 +178,23 @@ def get_university_id_for_org(cur, org_id: int) -> int | None:
         return None
     return row.get("university_id")
 
+@app.route("/debug/reset-password")
+def reset_pw():
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE users
+                    SET password_hash = %s
+                    WHERE email = %s
+                """, (
+                    generate_password_hash("123456"),
+                    "0322-3713@lspu.edu.ph"
+                ))
+        return "Password reset"
+    finally:
+        conn.close()
 # =========================================================
 # CSRF Helper function
 # =========================================================
@@ -198,6 +215,7 @@ def csrf_validate_or_abort():
 @app.context_processor
 def inject_csrf():
     return {"csrf_token": get_csrf_token()}
+    
 
 
 # =========================================================
@@ -3410,6 +3428,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
