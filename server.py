@@ -954,7 +954,26 @@ def webhook():
                             student_id_input = parts[2].strip()
                             send_message(sender_id, handle_admin_student(cur, today_ph, org_id, student_id_input))
                             return "ok", 200
-
+                        # ADMIN FORCE TIMEOUT <student_id>
+                        if cmd.startswith("ADMIN FORCE TIMEOUT"):
+                            if len(parts) != 4:
+                                send_message(sender_id, usage(
+                                    "ADMIN FORCE TIMEOUT",
+                                    "ADMIN FORCE TIMEOUT <student_id>",
+                                    "ADMIN FORCE TIMEOUT 2020-12345"
+                                ))
+                                return "ok", 200
+                        
+                            admin_user_id, org_id = get_admin_scope_by_messenger(cur, sender_id)
+                            if not admin_user_id or not org_id:
+                                send_message(sender_id, "⛔ Admin access required.")
+                                return "ok", 200
+                        
+                            student_id_input = parts[3].strip()
+                            result = handle_admin_force_timeout(cur, org_id, student_id_input)
+                        
+                            send_message(sender_id, result)
+                            return "ok", 200
                         # ADMIN CLASS <course> <section>
                         if cmd.startswith("ADMIN CLASS"):
                             if len(parts) != 4:
@@ -1078,16 +1097,22 @@ def webhook():
 
 @app.route("/cron/remind-missing-timeout", methods=["GET"])
 def cron_remind_missing_timeout():
+    print("🔥 CRON HIT")
+
     secret = request.args.get("secret", "")
     if not CRON_SECRET or secret != CRON_SECRET:
+        print("❌ INVALID SECRET:", secret)
         return "unauthorized", 401
 
     today_ph = datetime.now(PH_TZ).date()
+    print("📅 TODAY:", today_ph)
 
     conn = get_db_connection()
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                print("🔍 RUNNING QUERY...")
+
                 cur.execute("""
                     SELECT u.id AS user_id, u.messenger_id, u.full_name
                     FROM dtr_records r
@@ -1096,10 +1121,14 @@ def cron_remind_missing_timeout():
                       AND r.time_in IS NOT NULL
                       AND r.time_out IS NULL
                 """, (today_ph,))
+
                 rows = cur.fetchall()
+                print("📊 ROWS FOUND:", len(rows))
 
                 sent = 0
                 for row in rows:
+                    print("➡️ PROCESSING:", row["user_id"], row["full_name"])
+
                     cur.execute("""
                         INSERT INTO reminder_logs (user_id, date, reminder_type)
                         VALUES (%s, %s, %s)
@@ -1107,6 +1136,7 @@ def cron_remind_missing_timeout():
                     """, (row["user_id"], today_ph, "missing_time_out_6pm"))
 
                     if cur.rowcount == 0:
+                        print("⚠️ SKIPPED (already reminded):", row["user_id"])
                         continue
 
                     name = row.get("full_name") or ""
@@ -1114,13 +1144,18 @@ def cron_remind_missing_timeout():
                         f"⏰ Reminder{name and f', {name}'}: You still have no TIME OUT recorded for today.\n"
                         f"Reply: TIME OUT"
                     )
+
+                    print("📨 SENDING TO:", row["messenger_id"])
                     send_message(row["messenger_id"], msg)
+
+                    print("✅ SENT")
                     sent += 1
 
+        print("🎯 DONE:", {"targets": len(rows), "sent": sent})
         return {"date": str(today_ph), "targets": len(rows), "sent": sent}, 200
 
     except Exception as e:
-        print("cron reminder error:", e)
+        print("❌ CRON ERROR:", repr(e))
         return "error", 500
     finally:
         conn.close()
@@ -3035,6 +3070,73 @@ def handle_admin_class(cur, today_ph: date, org_id: int, course: str, section: s
             lines.append(f"...and {missing_count - 10} more")
 
     return "\n".join(lines)
+
+def handle_admin_force_timeout(cur, org_id: int, student_id_input: str) -> str:
+    # Find student (org scoped)
+    cur.execute("""
+        SELECT id, full_name
+        FROM users
+        WHERE student_id = %s
+          AND organization_id = %s
+          AND COALESCE(role,'student')='student'
+        LIMIT 1
+    """, (student_id_input, org_id))
+    u = cur.fetchone()
+
+    if not u:
+        return "❌ Student not found in your organization."
+
+    user_id = u["id"]
+
+    # Find open session
+    cur.execute("""
+        SELECT id, date, time_in
+        FROM dtr_records
+        WHERE user_id = %s
+          AND time_in IS NOT NULL
+          AND time_out IS NULL
+        ORDER BY date DESC
+        LIMIT 1
+    """, (user_id,))
+    rec = cur.fetchone()
+
+    if not rec:
+        return "✅ No open session found."
+
+    # Auto close at 5:00 PM PH time (safe default)
+    ph_time_out = datetime(
+        rec["date"].year,
+        rec["date"].month,
+        rec["date"].day,
+        17, 0,
+        tzinfo=PH_TZ
+    )
+
+    time_out_utc = ph_time_out.astimezone(timezone.utc)
+    time_in_utc = as_aware_utc(rec["time_in"])
+
+    minutes_worked = int((time_out_utc - time_in_utc).total_seconds() // 60)
+
+    if minutes_worked < 0:
+        minutes_worked = 0
+
+    # Update record
+    cur.execute("""
+        UPDATE dtr_records
+        SET time_out = %s,
+            minutes_worked = %s
+        WHERE id = %s
+    """, (time_out_utc, minutes_worked, rec["id"]))
+
+    # Recompute completion
+    recompute_completion(cur, user_id)
+
+    return (
+        f"✅ Forced TIME OUT applied\n"
+        f"Student: {u['full_name']}\n"
+        f"Date: {rec['date']}\n"
+        f"Worked: {fmt_hm(minutes_worked)}"
+    )
 # =========================================================
 # Home
 # =========================================================
@@ -3066,6 +3168,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
