@@ -1160,6 +1160,81 @@ def cron_remind_missing_timeout():
     finally:
         conn.close()
 
+# =========================================================
+
+@app.route("/cron/auto-close-sessions", methods=["GET"])
+def cron_auto_close_sessions():
+    print("🔥 AUTO CLOSE CRON HIT")
+
+    secret = request.args.get("secret", "")
+    if not CRON_SECRET or secret != CRON_SECRET:
+        print("❌ INVALID SECRET")
+        return "unauthorized", 401
+
+    today_ph = datetime.now(PH_TZ).date()
+
+    # Fixed cutoff = 6:00 PM PH
+    cutoff_ph = datetime(
+        today_ph.year, today_ph.month, today_ph.day,
+        18, 0, 0,
+        tzinfo=PH_TZ
+    )
+    cutoff_utc = cutoff_ph.astimezone(timezone.utc)
+
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+
+                # 🔍 Find ALL open sessions (not just today)
+                cur.execute("""
+                    SELECT id, user_id, time_in
+                    FROM dtr_records
+                    WHERE time_in IS NOT NULL
+                      AND time_out IS NULL
+                """)
+                rows = cur.fetchall()
+
+                print("📊 OPEN SESSIONS:", len(rows))
+
+                closed = 0
+
+                for r in rows:
+                    record_id = r["id"]
+                    time_in = as_aware_utc(r["time_in"])
+
+                    # Skip if time_in is AFTER cutoff (edge case)
+                    if time_in >= cutoff_utc:
+                        print("⚠️ SKIP (time_in after cutoff):", record_id)
+                        continue
+
+                    minutes = int((cutoff_utc - time_in).total_seconds() // 60)
+
+                    if minutes <= 0:
+                        print("⚠️ SKIP (invalid minutes):", record_id)
+                        continue
+
+                    # ✅ Close session
+                    cur.execute("""
+                        UPDATE dtr_records
+                        SET time_out = %s,
+                            minutes_worked = %s
+                        WHERE id = %s
+                    """, (cutoff_utc, minutes, record_id))
+
+                    print("✅ CLOSED:", record_id, "minutes:", minutes)
+                    closed += 1
+
+        print("🎯 TOTAL CLOSED:", closed)
+        return {"closed": closed}, 200
+
+    except Exception as e:
+        print("❌ AUTO CLOSE ERROR:", repr(e))
+        return "error", 500
+
+    finally:
+        conn.close()
+
 
 # =========================================================
 # Cron: Risk Snapshot (GET + secret)
@@ -3168,6 +3243,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
