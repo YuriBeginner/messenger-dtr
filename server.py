@@ -1805,7 +1805,15 @@ def admin_login():
                 # =========================
                 # WRONG PASSWORD
                 # =========================
-                if not check_password_hash(u["password_hash"], password):
+                print("INPUT PASSWORD:", password)
+                print("HASH:", u["password_hash"])
+                
+                valid = check_password_hash(u["password_hash"], password)
+                print("PASSWORD VALID:", valid)
+                
+                if not valid:
+                    login_attempt_record_failure(cur, email)
+                    return render_template("admin/login.html", error="Invalid credentials.")
                     locked = login_attempt_record_failure(cur, email)
 
                     log_admin_action(
@@ -3402,6 +3410,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
