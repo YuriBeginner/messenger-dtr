@@ -1534,7 +1534,11 @@ def admin_login():
                                 metadata={"ip": ip, "ua": ua, "lock_minutes": LOGIN_LOCK_MINUTES}
                             )
                 
-                    return render_template("admin/login.html", error="Invalid credentials.")
+                    # redirect based on role
+                    if u.get("role") == "university_admin":
+                        return redirect(url_for("university_dashboard"))
+                    else:
+                        return redirect(url_for("admin_dashboard"))
 
                     # =========================
                     # ✅ SUCCESSFUL LOGIN
@@ -1594,12 +1598,16 @@ def admin_login():
                             metadata={"ip": ip, "ua": ua, "lock_minutes": LOGIN_LOCK_MINUTES}
                         )
                 
-                    return render_template("admin/login.html", error="Invalid credentials.")
-        # SAFETY FALLBACK (prevents 500)
-    return render_template("admin/login.html", error="Unexpected login error. Please try again.")                
-    
-    finally:
-        conn.close()
+                    # redirect based on role
+                    if u.get("role") == "university_admin":
+                        return redirect(url_for("university_dashboard"))
+                    else:
+                        return redirect(url_for("admin_dashboard"))
+                        # SAFETY FALLBACK (prevents 500)
+                    return render_template("admin/login.html", error="Unexpected login error. Please try again.")                
+                    
+                    finally:
+                        conn.close()
 
 
 @app.route("/admin/logout")
@@ -3079,6 +3087,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
