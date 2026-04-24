@@ -1473,34 +1473,38 @@ def admin_login():
     if request.method == "GET":
         return render_template("admin/login.html", error=None)
 
-    email = _norm_email(request.form.get("email")) 
+    email = _norm_email(request.form.get("email"))
     password = request.form.get("password") or ""
-    
-    csrf_validate_or_abort()  # ✅ CSRF protection (keep this!)
-    
+
+    csrf_validate_or_abort()
+
     if not email or not password:
         return render_template("admin/login.html", error="Email and password are required.")
-    
+
     conn = get_db_connection()
     try:
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                # ✅ Check lock
+
+                # =========================
+                # CHECK LOCK
+                # =========================
                 attempt = login_attempt_get(cur, email)
                 now_utc = datetime.now(timezone.utc)
-                
+
                 if attempt and attempt.get("locked_until"):
                     locked_until = as_aware_utc(attempt["locked_until"])
                     if locked_until and now_utc < locked_until:
                         remaining = int((locked_until - now_utc).total_seconds())
-                
                         return render_template(
                             "admin/login.html",
                             lock_seconds=remaining,
                             error=None
                         )
-    
-                # ✅ Look up admin account
+
+                # =========================
+                # GET USER
+                # =========================
                 cur.execute("""
                     SELECT id, full_name, role, password_hash, organization_id
                     FROM users
@@ -1508,15 +1512,16 @@ def admin_login():
                     LIMIT 1
                 """, (email,))
                 u = cur.fetchone()
-    
+
                 ip = get_client_ip()
                 ua = get_user_agent()
-                
-                # Invalid user / not admin / missing hash
+
+                # =========================
+                # INVALID USER / ROLE
+                # =========================
                 if (not u) or (u.get("role") not in ("org_admin", "university_admin")) or (not u.get("password_hash")):
                     locked = login_attempt_record_failure(cur, email)
-                
-                    # Only log with admin_user_id if the user row exists
+
                     if u and u.get("id"):
                         log_admin_action(
                             cur,
@@ -1525,63 +1530,15 @@ def admin_login():
                             target=email,
                             metadata={"ip": ip, "ua": ua, "locked": locked}
                         )
-                        if locked:
-                            log_admin_action(
-                                cur,
-                                u["id"],
-                                "SECURITY_ACCOUNT_LOCKED",
-                                target=email,
-                                metadata={"ip": ip, "ua": ua, "lock_minutes": LOGIN_LOCK_MINUTES}
-                            )
-                
-                    # redirect based on role
-                    if u.get("role") == "university_admin":
-                        return redirect(url_for("university_dashboard"))
-                    else:
-                        return redirect(url_for("admin_dashboard"))
 
-                    # =========================
-                    # ✅ SUCCESSFUL LOGIN
-                    # =========================
-                    
-                    # reset login attempts
-                    login_attempt_reset(cur, email)
-                    
-                    # set session (IMPORTANT)
-                    session.clear()
-                    
-                    session["admin_user_id"] = u["id"]
-                    session["admin_name"] = u.get("full_name") or "Admin"
-                    session["role"] = u.get("role")
-                    
-                    session["org_id"] = u.get("organization_id")
-                    try:
-                        session["university_id"] = get_university_id_for_org(cur, u.get("organization_id"))
-                    except Exception as e:
-                        print("UNIVERSITY_ID_ERROR:", e)
-                        session["university_id"] = None
-                    
-                    # log success
-                    log_admin_action(
-                        cur,
-                        u["id"],
-                        "SECURITY_SUCCESSFUL_LOGIN",
-                        target=email,
-                        metadata={"ip": get_client_ip(), "ua": get_user_agent()}
-                    )
-                    
-                    # redirect based on role
-                    if u.get("role") == "university_admin":
-                        return redirect(url_for("university_dashboard"))
-                    else:
-                        return redirect(url_for("admin_dashboard"))
-    
-                # Wrong password
+                    return render_template("admin/login.html", error="Invalid credentials.")
+
+                # =========================
+                # WRONG PASSWORD
+                # =========================
                 if not check_password_hash(u["password_hash"], password):
-                    ip = get_client_ip()
-                    ua = get_user_agent()
                     locked = login_attempt_record_failure(cur, email)
-                
+
                     log_admin_action(
                         cur,
                         u["id"],
@@ -1589,26 +1546,48 @@ def admin_login():
                         target=email,
                         metadata={"ip": ip, "ua": ua, "locked": locked}
                     )
-                    if locked:
-                        log_admin_action(
-                            cur,
-                            u["id"],
-                            "SECURITY_ACCOUNT_LOCKED",
-                            target=email,
-                            metadata={"ip": ip, "ua": ua, "lock_minutes": LOGIN_LOCK_MINUTES}
-                        )
-                
-                    # redirect based on role
-                    if u.get("role") == "university_admin":
-                        return redirect(url_for("university_dashboard"))
-                    else:
-                        return redirect(url_for("admin_dashboard"))
-                        # SAFETY FALLBACK (prevents 500)
-                    return render_template("admin/login.html", error="Unexpected login error. Please try again.")                
-                    
-                finally:
-                    conn.close()
 
+                    return render_template("admin/login.html", error="Invalid credentials.")
+
+                # =========================
+                # SUCCESS LOGIN
+                # =========================
+                login_attempt_reset(cur, email)
+
+                session.clear()
+                session["admin_user_id"] = u["id"]
+                session["admin_name"] = u.get("full_name") or "Admin"
+                session["role"] = u.get("role")
+                session["org_id"] = u.get("organization_id")
+
+                # Safe university_id
+                try:
+                    session["university_id"] = get_university_id_for_org(cur, u.get("organization_id"))
+                except Exception as e:
+                    print("UNIVERSITY_ID_ERROR:", e)
+                    session["university_id"] = None
+
+                log_admin_action(
+                    cur,
+                    u["id"],
+                    "SECURITY_SUCCESSFUL_LOGIN",
+                    target=email,
+                    metadata={"ip": ip, "ua": ua}
+                )
+
+                # =========================
+                # REDIRECT
+                # =========================
+                if u.get("role") == "university_admin":
+                    return redirect(url_for("university_dashboard"))
+                else:
+                    return redirect(url_for("admin_dashboard"))
+
+        # fallback (inside try)
+        return render_template("admin/login.html", error="Unexpected login error.")
+
+    finally:
+        conn.close()
 
 @app.route("/admin/logout")
 @admin_required
@@ -3087,6 +3066,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
