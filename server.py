@@ -1786,7 +1786,7 @@ def admin_login():
                         return render_template(
                             "admin/login.html",
                             lock_seconds=remaining,
-                            error=None
+                            error=f"Account locked. Try again in {remaining//60} minutes."
                         )
 
                 # =========================
@@ -1799,6 +1799,7 @@ def admin_login():
                     LIMIT 1
                 """, (email,))
                 u = cur.fetchone()
+
                 print("LOGIN DEBUG:")
                 print("Input email:", email)
                 print("DB user:", u)
@@ -1808,41 +1809,30 @@ def admin_login():
 
                 # =========================
                 # INVALID USER / ROLE
+                # ✅ FIXED ROLE CHECK
                 # =========================
-                if (not u) or (u.get("role") not in ("org_admin", "university_admin")) or (not u.get("password_hash")):
-                    locked = login_attempt_record_failure(cur, email)
-
-                    if u and u.get("id"):
-                        log_admin_action(
-                            cur,
-                            u["id"],
-                            "SECURITY_FAILED_LOGIN",
-                            target=email,
-                            metadata={"ip": ip, "ua": ua, "locked": locked}
-                        )
-
+                if (not u) or (u.get("role") not in ("admin", "org_admin", "university_admin")) or (not u.get("password_hash")):
+                    login_attempt_record_failure(cur, email)
                     return render_template("admin/login.html", error="Invalid credentials.")
 
                 # =========================
-                # WRONG PASSWORD
+                # PASSWORD CHECK
                 # =========================
                 print("INPUT PASSWORD:", password)
                 print("HASH:", u["password_hash"])
-                
+
                 valid = check_password_hash(u["password_hash"], password)
                 print("PASSWORD VALID:", valid)
-                
+
                 if not valid:
                     login_attempt_record_failure(cur, email)
-                    return render_template("admin/login.html", error="Invalid credentials.")
-                    locked = login_attempt_record_failure(cur, email)
 
                     log_admin_action(
                         cur,
                         u["id"],
                         "SECURITY_FAILED_LOGIN",
                         target=email,
-                        metadata={"ip": ip, "ua": ua, "locked": locked}
+                        metadata={"ip": ip, "ua": ua}
                     )
 
                     return render_template("admin/login.html", error="Invalid credentials.")
@@ -1881,7 +1871,6 @@ def admin_login():
                 else:
                     return redirect(url_for("admin_dashboard"))
 
-        # fallback (inside try)
         return render_template("admin/login.html", error="Unexpected login error.")
 
     finally:
@@ -3431,6 +3420,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
