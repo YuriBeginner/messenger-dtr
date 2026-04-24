@@ -2,33 +2,133 @@
 <html>
 <head>
     <title>Create University</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f5f7fb;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: auto;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+        }
+
+        .card {
+            background: white;
+            padding: 25px;
+            border-radius: 12px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+        }
+
+        .section-title {
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #111827;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border: 1px solid #d1d5db;
+            font-size: 14px;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #3b82f6;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background-color: #10b981;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+
+        .btn:hover {
+            background-color: #059669;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .success {
+            background: #dcfce7;
+            color: #166534;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            white-space: pre-line;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 15px;
+            text-decoration: none;
+            color: #3b82f6;
+        }
+
+        .back-link:hover {
+            text-decoration: underline;
+        }
+
+    </style>
 </head>
 <body>
 
-<h1>Create University</h1>
+<div class="container">
 
-{% if error %}
-<p style="color:red;">{{ error }}</p>
-{% endif %}
+    <h1>Create University</h1>
+    <p style="color:#6b7280;">Set up a new university with its admin account.</p>
 
-{% if success %}
-<p style="color:green;">{{ success }}</p>
-{% endif %}
+    <div class="card">
 
-<form method="POST">
-    <h3>University Info</h3>
-    <input type="text" name="name" placeholder="University Name"><br><br>
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
 
-    <h3>Admin Info</h3>
-    <input type="text" name="admin_name" placeholder="Admin Name"><br><br>
-    <input type="email" name="admin_email" placeholder="Admin Email"><br><br>
-    <input type="password" name="password" placeholder="Password"><br><br>
+        {% if success %}
+        <div class="success">{{ success }}</div>
+        {% endif %}
 
-    <button type="submit">Create</button>
-</form>
+        <form method="POST">
 
-<br>
-<a href="/superadmin/dashboard">← Back to Dashboard</a>
+            <div class="section-title">University Information</div>
+            <input type="text" name="name" placeholder="University Name" required>
+
+            <div class="section-title">Admin Account</div>
+            <input type="text" name="admin_name" placeholder="Full Name" required>
+            <input type="email" name="admin_email" placeholder="Email Address" required>
+            <input type="password" name="password" placeholder="Password (min 6 characters)" required>
+
+            <button type="submit" class="btn">Create University</button>
+
+        </form>
+
+    </div>
+
+    <a href="/superadmin/dashboard" class="back-link">← Back to Dashboard</a>
+
+</div>
 
 </body>
 </html>
