@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Super Admin Dashboard</title>
+</head>
+<body>
+
+<h1>Super Admin Dashboard</h1>
+
+<h3>System Overview</h3>
+<ul>
+    <li>Total Universities: {{ total_orgs }}</li>
+    <li>Total Students: {{ total_students }}</li>
+    <li>Total Admins: {{ total_admins }}</li>
+</ul>
+
+<h3>Universities</h3>
+<table border="1">
+<tr>
+    <th>ID</th>
+    <th>Name</th>
+    <th>Created</th>
+</tr>
+{% for org in orgs %}
+<tr>
+    <td>{{ org.id }}</td>
+    <td>{{ org.name }}</td>
+    <td>{{ org.created_at }}</td>
+</tr>
+{% endfor %}
+</table>
+
+</body>
+</html>
