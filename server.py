@@ -715,40 +715,34 @@ def superadmin_dashboard():
         with conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
 
-                # total organizations
-                cur.execute("SELECT COUNT(*) AS c FROM organizations")
-                total_orgs = int(cur.fetchone()["c"])
-
-                # total students
                 cur.execute("""
-                    SELECT COUNT(*) AS c
-                    FROM users
-                    WHERE COALESCE(role,'student')='student'
-                """)
-                total_students = int(cur.fetchone()["c"])
+                    SELECT 
+                        u.id,
+                        u.name,
 
-                # total admins
-                cur.execute("""
-                    SELECT COUNT(*) AS c
-                    FROM users
-                    WHERE role = 'admin'
-                """)
-                total_admins = int(cur.fetchone()["c"])
+                        COUNT(DISTINCT o.id) AS org_count,
 
-                # org list
-                cur.execute("""
-                    SELECT id, name, created_at
-                    FROM organizations
-                    ORDER BY created_at DESC
+                        COUNT(DISTINCT usr.id) FILTER (
+                            WHERE COALESCE(usr.role,'student') = 'student'
+                        ) AS student_count,
+
+                        COUNT(DISTINCT usr.id) FILTER (
+                            WHERE usr.role = 'admin'
+                        ) AS admin_count
+
+                    FROM universities u
+                    LEFT JOIN organizations o ON o.university_id = u.id
+                    LEFT JOIN users usr ON usr.organization_id = o.id
+
+                    GROUP BY u.id
+                    ORDER BY u.id DESC
                 """)
-                orgs = cur.fetchall()
+
+                universities = cur.fetchall()
 
         return render_template(
             "superadmin/dashboard.html",
-            total_orgs=total_orgs,
-            total_students=total_students,
-            total_admins=total_admins,
-            orgs=orgs
+            universities=universities
         )
 
     finally:
@@ -3493,6 +3487,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
