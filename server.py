@@ -1266,6 +1266,33 @@ def webhook():
 # CSV Download Route
 # =========================================================
 
+@app.route("/debug/create-admin")
+def create_admin():
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO users (
+                        messenger_id,
+                        full_name,
+                        role,
+                        email,
+                        password_hash,
+                        is_super_admin
+                    )
+                    VALUES (%s,%s,%s,%s,%s,%s)
+                """, (
+                    "manual_admin",
+                    "Super Admin",
+                    "admin",
+                    "admin@test.com",
+                    generate_password_hash("admin123"),
+                    True
+                ))
+        return "Admin created: admin@test.com / admin123"
+    finally:
+        conn.close()
 
 
 # =========================================================
@@ -3420,6 +3447,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
