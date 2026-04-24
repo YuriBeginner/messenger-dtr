@@ -608,6 +608,31 @@ def admin_required(view_func):
         return view_func(*args, **kwargs)
     return wrapper
 
+def super_admin_required(view_func):
+    @wraps(view_func)
+    def wrapper(*args, **kwargs):
+        if not session.get("admin_user_id"):
+            return redirect(url_for("admin_login"))
+
+        conn = get_db_connection()
+        try:
+            with conn:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT is_super_admin
+                        FROM users
+                        WHERE id = %s
+                    """, (session["admin_user_id"],))
+                    u = cur.fetchone()
+
+                    if not u or not u.get("is_super_admin"):
+                        abort(403)
+        finally:
+            conn.close()
+
+        return view_func(*args, **kwargs)
+    return wrapper
+
 
 # =========================================================
 # Temporary debug route
@@ -655,6 +680,55 @@ def db_debug_org_joincodes():
 def bad_request(e):
     print("BAD_REQUEST:", repr(e))
     return "Bad Request", 400
+
+# =========================================================
+
+@app.route("/superadmin/dashboard")
+@super_admin_required
+def superadmin_dashboard():
+    conn = get_db_connection()
+    try:
+        with conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+
+                # total organizations
+                cur.execute("SELECT COUNT(*) AS c FROM organizations")
+                total_orgs = int(cur.fetchone()["c"])
+
+                # total students
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM users
+                    WHERE COALESCE(role,'student')='student'
+                """)
+                total_students = int(cur.fetchone()["c"])
+
+                # total admins
+                cur.execute("""
+                    SELECT COUNT(*) AS c
+                    FROM users
+                    WHERE role = 'admin'
+                """)
+                total_admins = int(cur.fetchone()["c"])
+
+                # org list
+                cur.execute("""
+                    SELECT id, name, created_at
+                    FROM organizations
+                    ORDER BY created_at DESC
+                """)
+                orgs = cur.fetchall()
+
+        return render_template(
+            "superadmin/dashboard.html",
+            total_orgs=total_orgs,
+            total_students=total_students,
+            total_admins=total_admins,
+            orgs=orgs
+        )
+
+    finally:
+        conn.close()
 
 
 # =========================================================
@@ -3243,6 +3317,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
