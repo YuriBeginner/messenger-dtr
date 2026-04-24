@@ -1606,8 +1606,8 @@ def admin_login():
                         # SAFETY FALLBACK (prevents 500)
                     return render_template("admin/login.html", error="Unexpected login error. Please try again.")                
                     
-                    finally:
-                        conn.close()
+                finally:
+                    conn.close()
 
 
 @app.route("/admin/logout")
@@ -3087,6 +3087,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
