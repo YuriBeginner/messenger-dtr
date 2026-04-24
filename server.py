@@ -738,6 +738,60 @@ def superadmin_dashboard():
 
 
 # =========================================================
+@app.route("/superadmin/create-university", methods=["GET", "POST"])
+@super_admin_required
+def create_university():
+    error = None
+    success = None
+
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        admin_name = (request.form.get("admin_name") or "").strip()
+        admin_email = (request.form.get("admin_email") or "").strip().lower()
+        password = (request.form.get("password") or "").strip()
+
+        if not name or not admin_name or not admin_email or not password:
+            error = "All fields are required."
+        else:
+            conn = get_db_connection()
+            try:
+                with conn:
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+
+                        # 1️⃣ Create organization
+                        cur.execute("""
+                            INSERT INTO organizations (name)
+                            VALUES (%s)
+                            RETURNING id
+                        """, (name,))
+                        org_id = cur.fetchone()["id"]
+
+                        # 2️⃣ Create admin
+                        password_hash = generate_password_hash(password)
+
+                        cur.execute("""
+                            INSERT INTO users
+                                (full_name, email, password_hash, role, organization_id)
+                            VALUES (%s, %s, %s, 'admin', %s)
+                        """, (admin_name, admin_email, password_hash, org_id))
+
+                        success = "University and admin created successfully."
+
+            except Exception as e:
+                print("CREATE UNIVERSITY ERROR:", e)
+                error = "Failed to create university."
+
+            finally:
+                conn.close()
+
+    return render_template(
+        "superadmin/create_university.html",
+        error=error,
+        success=success
+    )
+
+
+# =========================================================
 # Completion + Risk Helpers
 # =========================================================
 
@@ -3323,6 +3377,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
