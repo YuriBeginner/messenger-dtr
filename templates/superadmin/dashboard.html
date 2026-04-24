@@ -125,19 +125,18 @@
     </div>
 
     <!-- STATS -->
-    <div class="cards">
         <div class="card">
-            <h2>{{ universities|length }}</h2>
+            <h2>{{ total_universities or 0 }}</h2>
             <p>Universities</p>
         </div>
-
+        
         <div class="card">
-            <h2>—</h2>
+            <h2>{{ total_students or 0 }}</h2>
             <p>Students</p>
         </div>
-
+        
         <div class="card">
-            <h2>—</h2>
+            <h2>{{ total_admins or 0 }}</h2>
             <p>Admins</p>
         </div>
     </div>
