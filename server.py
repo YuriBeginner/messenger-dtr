@@ -611,6 +611,8 @@ def admin_required(view_func):
 def super_admin_required(view_func):
     @wraps(view_func)
     def wrapper(*args, **kwargs):
+        print("SESSION USER ID:", session.get("admin_user_id"))
+
         if not session.get("admin_user_id"):
             return redirect(url_for("admin_login"))
 
@@ -619,14 +621,18 @@ def super_admin_required(view_func):
             with conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute("""
-                        SELECT is_super_admin
+                        SELECT id, email, is_super_admin
                         FROM users
                         WHERE id = %s
                     """, (session["admin_user_id"],))
+
                     u = cur.fetchone()
+                    print("DB USER:", u)
 
                     if not u or not u.get("is_super_admin"):
+                        print("❌ NOT SUPER ADMIN")
                         abort(403)
+
         finally:
             conn.close()
 
@@ -3317,6 +3323,7 @@ def home():
 # =========================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+
 
 
 
