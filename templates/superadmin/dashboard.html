@@ -11,13 +11,34 @@
             padding: 20px;
         }
 
+        .container {
+            max-width: 1200px;
+            margin: auto;
+        }
+
         h1 {
             margin-bottom: 10px;
         }
 
-        .container {
-            max-width: 1200px;
-            margin: auto;
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+        }
+
+        .btn {
+            padding: 10px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 14px;
+            background-color: #10b981;
+            color: white;
+            font-weight: bold;
+        }
+
+        .btn:hover {
+            background-color: #059669;
         }
 
         /* ===== CARDS ===== */
@@ -42,7 +63,7 @@
         }
 
         .card p {
-            margin: 5px 0 0;
+            margin-top: 5px;
             color: #6b7280;
         }
 
@@ -70,33 +91,23 @@
             background-color: #f9fafb;
         }
 
-        /* ===== BUTTON ===== */
-        .btn {
+        .view-btn {
+            background-color: #3b82f6;
             padding: 6px 12px;
             border-radius: 6px;
-            text-decoration: none;
-            font-size: 14px;
-            background-color: #3b82f6;
             color: white;
+            text-decoration: none;
+            font-size: 13px;
         }
 
-        .btn:hover {
+        .view-btn:hover {
             background-color: #2563eb;
         }
 
-        .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .create-btn {
-            background: #10b981;
-        }
-
-        .create-btn:hover {
-            background: #059669;
+        .empty {
+            text-align: center;
+            padding: 20px;
+            color: #6b7280;
         }
 
     </style>
@@ -108,25 +119,25 @@
     <!-- HEADER -->
     <div class="header">
         <h1>Super Admin Dashboard</h1>
-        <a href="/superadmin/create-university" class="btn create-btn">
+        <a href="/superadmin/create-university" class="btn">
             + Create University
         </a>
     </div>
 
-    <!-- OVERVIEW CARDS -->
+    <!-- STATS -->
     <div class="cards">
         <div class="card">
-            <h2>{{ total_orgs }}</h2>
+            <h2>{{ universities|length }}</h2>
             <p>Universities</p>
         </div>
 
         <div class="card">
-            <h2>{{ total_students }}</h2>
+            <h2>—</h2>
             <p>Students</p>
         </div>
 
         <div class="card">
-            <h2>{{ total_admins }}</h2>
+            <h2>—</h2>
             <p>Admins</p>
         </div>
     </div>
@@ -138,22 +149,34 @@
         <tr>
             <th>ID</th>
             <th>Name</th>
+            <th>Organizations</th>
+            <th>Students</th>
+            <th>Admins</th>
             <th>Created</th>
             <th>Action</th>
         </tr>
 
-        {% for org in orgs %}
-        <tr>
-            <td>{{ org.id }}</td>
-            <td>{{ org.name }}</td>
-            <td>{{ org.created_at }}</td>
-            <td>
-                <a href="/superadmin/university/{{ org.id }}" class="btn">
-                    View
-                </a>
-            </td>
-        </tr>
-        {% endfor %}
+        {% if universities %}
+            {% for u in universities %}
+            <tr>
+                <td>{{ u.id }}</td>
+                <td>{{ u.name }}</td>
+                <td>{{ u.org_count }}</td>
+                <td>{{ u.student_count }}</td>
+                <td>{{ u.admin_count }}</td>
+                <td>{{ u.created_at }}</td>
+                <td>
+                    <a href="/superadmin/university/{{ u.id }}" class="view-btn">
+                        View
+                    </a>
+                </td>
+            </tr>
+            {% endfor %}
+        {% else %}
+            <tr>
+                <td colspan="7" class="empty">No universities found</td>
+            </tr>
+        {% endif %}
     </table>
 
 </div>
